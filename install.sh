@@ -136,16 +136,19 @@ setup_path() {
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     SCRIPTS_PATH="$SCRIPT_DIR/scripts"
     
-    # 检测 shell
-    if [ -n "$ZSH_VERSION" ]; then
+    # 检测用户的默认 shell
+    USER_SHELL=$(basename "$SHELL")
+    
+    if [ "$USER_SHELL" = "zsh" ]; then
         SHELL_RC="$HOME/.zshrc"
         SHELL_NAME="zsh"
-    elif [ -n "$BASH_VERSION" ]; then
+    elif [ "$USER_SHELL" = "bash" ]; then
         SHELL_RC="$HOME/.bash_profile"
         SHELL_NAME="bash"
     else
+        # 对于其他shell，使用通用的配置文件
         SHELL_RC="$HOME/.profile"
-        SHELL_NAME="shell"
+        SHELL_NAME="$USER_SHELL"
     fi
     
     # 检查是否已经添加到 PATH
