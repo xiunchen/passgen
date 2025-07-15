@@ -1,0 +1,17 @@
+#!/bin/bash
+# 密码生成器启动脚本
+
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# 设置Python路径
+export PYTHONPATH="$PROJECT_DIR:$PYTHONPATH"
+
+# 检查是否有虚拟环境
+if [ -d "$PROJECT_DIR/venv" ]; then
+    source "$PROJECT_DIR/venv/bin/activate"
+fi
+
+# 运行密码生成器
+python3 "$PROJECT_DIR/passgen.py" "$@"

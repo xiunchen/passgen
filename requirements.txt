@@ -1,0 +1,15 @@
+# 密码生成器和管理器 - 核心依赖
+
+# 加密和安全
+cryptography>=41.0.0
+keyring>=24.0.0
+
+# CLI框架和UI
+click>=8.1.0
+rich>=13.0.0
+
+# 剪贴板操作
+pyperclip>=1.8.2
+
+# macOS Touch ID支持
+pyobjc-framework-LocalAuthentication>=10.0
