@@ -248,17 +248,68 @@ readlink ~/.passgen.db
 open ~/Library/Mobile\ Documents/com~apple~CloudDocs/PassGen/
 ```
 
-### 🔄 多设备使用注意事项
+### 🔄 多设备使用详细指南
+
+#### 第二台 Mac 完整设置步骤
+
+**⚠️ 重要警告**：
+- `passgen init` 会在 `~/.passgen.db` 创建新的数据库文件
+- 创建软链接前**必须先删除**这个文件，否则会有文件名冲突
+- 删除的是空的新数据库，不会影响 iCloud 中的原始数据
+
+**重要概念**：
+- 📁 **数据库文件**：存储在 iCloud 中，可以在多台设备间共享
+- 🔐 **钥匙串和 Touch ID**：每台 Mac 独立，不会同步
+- 🔑 **主密码**：所有设备必须使用相同的主密码
+
+**完整设置流程**：
+
+```bash
+# 第二台 Mac 上的设置步骤：
+
+# 步骤1：确保 iCloud 同步完成
+ls -la "$HOME/Library/Mobile Documents/com~apple~CloudDocs/PassGen/"
+# 确认能看到 .passgen.db 文件
+
+# 步骤2：创建软链接
+ln -s "$HOME/Library/Mobile Documents/com~apple~CloudDocs/PassGen/.passgen.db" ~/.passgen.db
+
+# 步骤3：首次认证（设置钥匙串）
+passgen list
+# 会提示输入主密码（使用与第一台 Mac 相同的密码）
+# 输入正确后，主密码会保存到本机钥匙串，Touch ID 自动启用
+
+# 验证设置成功
+passgen status  # 查看 Touch ID 状态
+```
+
+**如果遇到"存储文件不存在"错误**：
+
+```bash
+# 这通常是因为钥匙串中没有主密码记录，解决方法：
+
+# 方法1：运行任何需要认证的命令来触发密码设置
+passgen list  # 输入主密码后会自动保存到钥匙串
+
+# 方法2：如果方法1不工作，手动初始化钥匙串
+passgen init  # 输入相同的主密码（这会创建一个新的 ~/.passgen.db 文件）
+rm ~/.passgen.db  # ⚠️ 重要：删除刚创建的空数据库文件，避免与软链接冲突
+ln -s "$HOME/Library/Mobile Documents/com~apple~CloudDocs/PassGen/.passgen.db" ~/.passgen.db
+```
+
+#### 多设备使用注意事项
 
 1. **Touch ID 独立性**：每台设备的 Touch ID 设置独立，需要在每台 Mac 上分别进行首次密码认证
 
-2. **同步延迟**：iCloud 同步可能有几秒到几分钟的延迟，建议：
+2. **主密码一致性**：所有设备必须使用相同的主密码，否则无法解密数据库
+
+3. **同步延迟**：iCloud 同步可能有几秒到几分钟的延迟，建议：
    - 添加密码后等待同步完成再在其他设备使用
    - 避免同时在多台设备上修改密码库
 
-3. **网络要求**：需要稳定的网络连接才能正常同步
+4. **网络要求**：需要稳定的网络连接才能正常同步
 
-4. **冲突处理**：如果出现同步冲突，iCloud 会保留多个版本，手动选择需要的版本
+5. **冲突处理**：如果出现同步冲突，iCloud 会保留多个版本，手动选择需要的版本
 
 ### 🔒 安全建议
 
@@ -280,9 +331,11 @@ cp ~/.passgen.db ~/Documents/passgen_backup_$(date +%Y%m%d).db
 3. **重新认证**：删除旧数据重新初始化
 
 ```bash
-# 清理并重新初始化
+# 清理并重新初始化（仅限单设备使用）
 rm ~/.passgen.db
 passgen init
+
+# 如果使用 iCloud 同步，请按照多设备设置指南操作
 ```
 
 ### 依赖问题
@@ -403,9 +456,19 @@ readlink ~/.passgen.db
 passgen list  # 确认数据仍然可访问
 
 # 5. 在其他 Mac 上设置
-# 在第二台 Mac 上运行（使用绝对路径）：
+# 重要：每台 Mac 都需要单独设置 Touch ID 和钥匙串，但可以共享同一个数据库文件
+
+# 方法1：直接链接到现有的 iCloud 数据库（推荐）
 ln -s "$HOME/Library/Mobile Documents/com~apple~CloudDocs/PassGen/.passgen.db" ~/.passgen.db
-passgen list  # 首次需要输入主密码并设置 Touch ID
+# 首次使用时会提示"存储文件不存在"，这是正常的，因为钥匙串中还没有主密码
+
+# 方法2：先初始化再替换（如果方法1不行）
+passgen init  # 设置主密码（与第一台 Mac 相同的密码）
+rm ~/.passgen.db  # ⚠️ 重要：删除 init 创建的空数据库文件
+ln -s "$HOME/Library/Mobile Documents/com~apple~CloudDocs/PassGen/.passgen.db" ~/.passgen.db
+
+# 验证设置
+passgen list  # 输入主密码，Touch ID 将自动启用
 ```
 
 ## 🔐 认证流程
