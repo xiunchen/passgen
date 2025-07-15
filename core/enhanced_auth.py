@@ -149,13 +149,63 @@ class EnhancedAuthManager:
                             password=password
                         )
                     else:
-                        # 密码无效，清除Keychain中的错误密码
-                        self._clear_invalid_password_from_keychain()
-                        return AuthResult(
-                            success=False, 
-                            method="touchid", 
-                            error_message="Touch ID认证成功但密码已失效，请重新输入密码"
-                        )
+                        # 密码无效，可能是盐值不匹配，进行智能诊断
+                        print("🔍 Touch ID认证成功，但检测到数据库同步问题...")
+                        diagnosis = self._diagnose_auth_failure()
+                        
+                        if self._detect_backup_file():
+                            print("🔍 检测到备份数据库文件")
+                            print("💡 此数据库文件可能来自其他设备")
+                            print("🔐 请输入创建此备份时使用的密码:")
+                            
+                            # 提示用户输入备份密码
+                            try:
+                                import getpass
+                                backup_password = getpass.getpass("备份密码: ")
+                                
+                                if backup_password:
+                                    # 验证备份密码
+                                    from core.storage import SecureStorage
+                                    storage = SecureStorage()
+                                    
+                                    if storage.verify_master_password(backup_password):
+                                        # 密码正确，启动会话
+                                        self._start_session(backup_password)
+                                        self._save_password_to_keychain(backup_password)
+                                        return AuthResult(
+                                            success=True,
+                                            method="backup_recovery",
+                                            password=backup_password
+                                        )
+                                    else:
+                                        self._clear_invalid_password_from_keychain()
+                                        return AuthResult(
+                                            success=False,
+                                            method="touchid_recovery_failed",
+                                            error_message="备份密码错误"
+                                        )
+                                else:
+                                    self._clear_invalid_password_from_keychain()
+                                    return AuthResult(
+                                        success=False,
+                                        method="touchid_cancelled",
+                                        error_message="用户取消输入备份密码"
+                                    )
+                            except Exception as e:
+                                self._clear_invalid_password_from_keychain()
+                                return AuthResult(
+                                    success=False,
+                                    method="touchid_input_error",
+                                    error_message=f"密码输入错误: {e}"
+                                )
+                        else:
+                            # 其他类型的错误
+                            self._clear_invalid_password_from_keychain()
+                            return AuthResult(
+                                success=False, 
+                                method="touchid", 
+                                error_message="Touch ID认证成功但数据库访问失败，请尝试手动认证"
+                            )
             
             return AuthResult(success=False, method="touchid", error_message="Touch ID验证失败或超时")
             
@@ -209,11 +259,33 @@ class EnhancedAuthManager:
             
             # 验证密码是否正确
             if not self._verify_password_with_database(password):
-                return AuthResult(
-                    success=False,
-                    method="password",
-                    error_message="密码错误"
-                )
+                # 密码验证失败，进行智能诊断
+                diagnosis = self._diagnose_auth_failure()
+                
+                if self._detect_backup_file():
+                    # 检测到备份文件，提示用户
+                    print("\n🔍 检测到备份数据库文件")
+                    print("💡 如果这是从其他设备复制的文件，请使用原始密码")
+                    return AuthResult(
+                        success=False,
+                        method="password",
+                        error_message="密码错误（可能需要使用创建备份时的密码）"
+                    )
+                else:
+                    # 其他错误，返回相应的错误信息
+                    error_messages = {
+                        "NO_DATABASE": "数据库文件不存在",
+                        "NO_KEYCHAIN_DATA": "首次使用此设备，密码验证失败",
+                        "DATABASE_CORRUPTION": "数据库文件可能已损坏",
+                        "WRONG_PASSWORD": "密码错误",
+                        "UNKNOWN_ERROR": "认证过程中发生未知错误"
+                    }
+                    
+                    return AuthResult(
+                        success=False,
+                        method="password",
+                        error_message=error_messages.get(diagnosis, "密码错误")
+                    )
             
             # 密码正确，启动会话
             self._start_session(password)
@@ -297,6 +369,47 @@ class EnhancedAuthManager:
             return storage.verify_master_password(password)
         except Exception:
             return False
+    
+    def _diagnose_auth_failure(self) -> str:
+        """诊断认证失败的具体原因"""
+        try:
+            from pathlib import Path
+            
+            # 检查数据库文件是否存在
+            db_path = Path.home() / ".passgen.db"
+            if not db_path.exists():
+                return "NO_DATABASE"
+            
+            # 检查钥匙串中是否有主密钥数据
+            try:
+                master_key_data = keyring.get_password(self.SERVICE_NAME, self.MASTER_KEY)
+                if not master_key_data:
+                    return "NO_KEYCHAIN_DATA"
+            except Exception:
+                return "NO_KEYCHAIN_DATA"
+            
+            # 检查数据库文件格式
+            try:
+                with open(db_path, 'rb') as f:
+                    data = f.read(64)  # 读取前64字节
+                    if len(data) < 32:
+                        return "DATABASE_CORRUPTION"
+            except Exception:
+                return "DATABASE_CORRUPTION"
+            
+            # 检查是否可能是盐值不匹配
+            if self._likely_salt_mismatch():
+                return "SALT_MISMATCH"
+            
+            return "WRONG_PASSWORD"
+            
+        except Exception:
+            return "UNKNOWN_ERROR"
+    
+    
+    
+    
+    
     
     def _clear_invalid_password_from_keychain(self):
         """清除Keychain中的无效密码"""

@@ -1,6 +1,7 @@
 """
 加密存储模块
 提供安全的密码存储和检索功能
+支持自包含的数据库文件格式，可跨设备恢复
 """
 
 import json
@@ -35,13 +36,35 @@ class PasswordEntry:
 
 
 class SecureStorage:
-    """安全存储管理器"""
+    """
+    安全存储管理器
+    
+    文件格式 v2:
+    [4字节: "PGv2"] + [32字节: 验证盐值] + [32字节: 验证哈希] + 
+    [32字节: 加密盐值] + [12字节: nonce] + [密文]
+    
+    特点:
+    - 密码验证无需解密整个文件
+    - 文件完全自包含，支持跨设备恢复
+    - 双重盐值设计，提高安全性
+    """
     
     SERVICE_NAME = "PassGen"
     MASTER_KEY_NAME = "master_key"
-    SALT_SIZE = 32
-    KEY_SIZE = 32
+    
+    # 文件格式标识
+    FILE_VERSION = b"PGv2"
+    VERSION_SIZE = 4
+    
+    # 加密参数
+    VERIFY_SALT_SIZE = 32
+    VERIFY_HASH_SIZE = 32
+    ENCRYPT_SALT_SIZE = 32
     NONCE_SIZE = 12
+    KEY_SIZE = 32
+    
+    # 文件头总大小
+    HEADER_SIZE = VERSION_SIZE + VERIFY_SALT_SIZE + VERIFY_HASH_SIZE + ENCRYPT_SALT_SIZE + NONCE_SIZE
     
     def __init__(self, storage_path: str = None):
         """
@@ -72,29 +95,44 @@ class SecureStorage:
             初始化是否成功
         """
         try:
-            # 生成盐值
-            salt = os.urandom(self.SALT_SIZE)
+            # 生成两个不同的盐值
+            verify_salt = os.urandom(self.VERIFY_SALT_SIZE)
+            encrypt_salt = os.urandom(self.ENCRYPT_SALT_SIZE)
             
-            # 将盐值和主密码哈希存储到 Keychain
-            key_data = {
-                'salt': salt.hex(),
-                'created_at': datetime.now().isoformat()
-            }
+            # 生成密码验证哈希
+            verify_hash = self._generate_verification_hash(master_password, verify_salt)
             
-            keyring.set_password(
-                self.SERVICE_NAME, 
-                self.MASTER_KEY_NAME, 
-                json.dumps(key_data)
-            )
+            # 生成随机nonce
+            nonce = os.urandom(self.NONCE_SIZE)
             
-            # 创建空的数据库文件
+            # 创建空的数据库内容
             empty_data = {
-                "version": "1.0",
+                "version": "2.0",
                 "passwords": [],
                 "created_at": datetime.now().isoformat()
             }
             
-            self._save_encrypted_data(empty_data, master_password)
+            # 加密数据
+            key = self._derive_key(master_password, encrypt_salt)
+            plaintext = json.dumps(empty_data, ensure_ascii=False, indent=2).encode()
+            aesgcm = AESGCM(key)
+            ciphertext = aesgcm.encrypt(nonce, plaintext, None)
+            
+            # 保存文件
+            with open(self.storage_path, 'wb') as f:
+                f.write(self.FILE_VERSION)
+                f.write(verify_salt)
+                f.write(verify_hash)
+                f.write(encrypt_salt)
+                f.write(nonce)
+                f.write(ciphertext)
+            
+            # 设置文件权限
+            os.chmod(self.storage_path, 0o600)
+            
+            # 同步盐值信息到Keychain（用于Touch ID集成）
+            self._sync_to_keychain(verify_salt, encrypt_salt)
+            
             return True
             
         except Exception as e:
@@ -103,15 +141,19 @@ class SecureStorage:
     
     def is_initialized(self) -> bool:
         """检查是否已初始化"""
+        if not self.storage_path.exists():
+            return False
+        
         try:
-            key_data = keyring.get_password(self.SERVICE_NAME, self.MASTER_KEY_NAME)
-            return key_data is not None and self.storage_path.exists()
+            with open(self.storage_path, 'rb') as f:
+                version = f.read(self.VERSION_SIZE)
+                return version == self.FILE_VERSION
         except:
             return False
     
     def verify_master_password(self, master_password: str) -> bool:
         """
-        验证主密码
+        验证主密码（无需解密整个文件）
         
         Args:
             master_password: 主密码
@@ -119,9 +161,22 @@ class SecureStorage:
         Returns:
             验证是否成功
         """
+        if not self.is_initialized():
+            return False
+        
         try:
-            self._load_encrypted_data(master_password)
-            return True
+            with open(self.storage_path, 'rb') as f:
+                # 读取文件头
+                f.read(self.VERSION_SIZE)  # 跳过版本
+                verify_salt = f.read(self.VERIFY_SALT_SIZE)
+                stored_hash = f.read(self.VERIFY_HASH_SIZE)
+            
+            # 计算验证哈希
+            computed_hash = self._generate_verification_hash(master_password, verify_salt)
+            
+            # 比较哈希
+            return computed_hash == stored_hash
+            
         except:
             return False
     
@@ -155,6 +210,7 @@ class SecureStorage:
             raise ValueError("网站/应用名称不能超过200个字符")
         if len(notes) > 1000:
             raise ValueError("备注不能超过1000个字符")
+            
         data = self._load_encrypted_data(master_password)
         
         entry_id = str(uuid.uuid4())
@@ -333,6 +389,66 @@ class SecureStorage:
         except:
             return False
     
+    def recover_from_file(self, file_path: str, password: str) -> bool:
+        """
+        从备份文件恢复（支持跨设备恢复）
+        
+        Args:
+            file_path: 备份文件路径
+            password: 备份文件的密码
+            
+        Returns:
+            恢复是否成功
+        """
+        try:
+            # 读取备份文件
+            with open(file_path, 'rb') as f:
+                backup_data = f.read()
+            
+            # 验证文件格式
+            if len(backup_data) < self.HEADER_SIZE:
+                return False
+            
+            if backup_data[:self.VERSION_SIZE] != self.FILE_VERSION:
+                return False
+            
+            # 验证密码
+            verify_salt = backup_data[self.VERSION_SIZE:self.VERSION_SIZE + self.VERIFY_SALT_SIZE]
+            stored_hash = backup_data[self.VERSION_SIZE + self.VERIFY_SALT_SIZE:
+                                    self.VERSION_SIZE + self.VERIFY_SALT_SIZE + self.VERIFY_HASH_SIZE]
+            
+            computed_hash = self._generate_verification_hash(password, verify_salt)
+            if computed_hash != stored_hash:
+                return False
+            
+            # 密码正确，复制文件
+            with open(self.storage_path, 'wb') as f:
+                f.write(backup_data)
+            
+            os.chmod(self.storage_path, 0o600)
+            
+            # 同步盐值到Keychain
+            encrypt_salt = backup_data[self.VERSION_SIZE + self.VERIFY_SALT_SIZE + self.VERIFY_HASH_SIZE:
+                                      self.VERSION_SIZE + self.VERIFY_SALT_SIZE + self.VERIFY_HASH_SIZE + self.ENCRYPT_SALT_SIZE]
+            self._sync_to_keychain(verify_salt, encrypt_salt)
+            
+            return True
+            
+        except Exception as e:
+            print(f"恢复失败: {e}")
+            return False
+    
+    def _generate_verification_hash(self, password: str, salt: bytes) -> bytes:
+        """生成密码验证哈希"""
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=self.VERIFY_HASH_SIZE,
+            salt=salt,
+            iterations=100000,
+            backend=default_backend()
+        )
+        return kdf.derive(password.encode())
+    
     def _derive_key(self, password: str, salt: bytes) -> bytes:
         """从密码派生加密密钥"""
         kdf = PBKDF2HMAC(
@@ -344,64 +460,83 @@ class SecureStorage:
         )
         return kdf.derive(password.encode())
     
-    def _get_master_key_data(self) -> Dict[str, str]:
-        """从Keychain获取主密钥数据"""
-        key_data_str = keyring.get_password(self.SERVICE_NAME, self.MASTER_KEY_NAME)
-        if not key_data_str:
-            raise ValueError("未找到主密钥数据，请先初始化")
-        
-        return json.loads(key_data_str)
-    
     def _load_encrypted_data(self, master_password: str) -> Dict[str, Any]:
         """加载并解密数据"""
         if not self.storage_path.exists():
             raise FileNotFoundError("存储文件不存在")
         
-        # 获取盐值
-        key_data = self._get_master_key_data()
-        salt = bytes.fromhex(key_data['salt'])
-        
-        # 派生密钥
-        key = self._derive_key(master_password, salt)
-        
-        # 读取加密数据
         with open(self.storage_path, 'rb') as f:
-            encrypted_data = f.read()
+            # 读取文件头
+            version = f.read(self.VERSION_SIZE)
+            if version != self.FILE_VERSION:
+                raise ValueError("不支持的文件格式版本")
+            
+            verify_salt = f.read(self.VERIFY_SALT_SIZE)
+            stored_hash = f.read(self.VERIFY_HASH_SIZE)
+            encrypt_salt = f.read(self.ENCRYPT_SALT_SIZE)
+            nonce = f.read(self.NONCE_SIZE)
+            ciphertext = f.read()
         
-        # 分离nonce和密文
-        nonce = encrypted_data[:self.NONCE_SIZE]
-        ciphertext = encrypted_data[self.NONCE_SIZE:]
+        # 验证密码
+        computed_hash = self._generate_verification_hash(master_password, verify_salt)
+        if computed_hash != stored_hash:
+            raise ValueError("密码错误")
         
-        # 解密
+        # 解密数据
+        key = self._derive_key(master_password, encrypt_salt)
         aesgcm = AESGCM(key)
+        
         try:
             plaintext = aesgcm.decrypt(nonce, ciphertext, None)
             return json.loads(plaintext.decode())
         except Exception as e:
-            raise ValueError("解密失败，密码可能不正确") from e
+            raise ValueError("解密失败") from e
     
     def _save_encrypted_data(self, data: Dict[str, Any], master_password: str):
         """加密并保存数据"""
-        # 获取盐值
-        key_data = self._get_master_key_data()
-        salt = bytes.fromhex(key_data['salt'])
+        # 读取现有文件的盐值信息
+        with open(self.storage_path, 'rb') as f:
+            f.read(self.VERSION_SIZE)
+            verify_salt = f.read(self.VERIFY_SALT_SIZE)
+            stored_hash = f.read(self.VERIFY_HASH_SIZE)
+            encrypt_salt = f.read(self.ENCRYPT_SALT_SIZE)
         
-        # 派生密钥
-        key = self._derive_key(master_password, salt)
-        
-        # 序列化数据
-        plaintext = json.dumps(data, ensure_ascii=False, indent=2).encode()
-        
-        # 生成随机nonce
+        # 生成新的nonce
         nonce = os.urandom(self.NONCE_SIZE)
         
-        # 加密
+        # 加密数据
+        key = self._derive_key(master_password, encrypt_salt)
+        plaintext = json.dumps(data, ensure_ascii=False, indent=2).encode()
         aesgcm = AESGCM(key)
         ciphertext = aesgcm.encrypt(nonce, plaintext, None)
         
         # 保存到文件
         with open(self.storage_path, 'wb') as f:
-            f.write(nonce + ciphertext)
+            f.write(self.FILE_VERSION)
+            f.write(verify_salt)
+            f.write(stored_hash)
+            f.write(encrypt_salt)
+            f.write(nonce)
+            f.write(ciphertext)
         
         # 设置文件权限
         os.chmod(self.storage_path, 0o600)
+    
+    def _sync_to_keychain(self, verify_salt: bytes, encrypt_salt: bytes):
+        """同步盐值信息到Keychain（用于Touch ID集成）"""
+        try:
+            key_data = {
+                'encrypt_salt': encrypt_salt.hex(),
+                'verify_salt': verify_salt.hex(),
+                'created_at': datetime.now().isoformat(),
+                'format_version': 'v2'
+            }
+            
+            keyring.set_password(
+                self.SERVICE_NAME,
+                self.MASTER_KEY_NAME,
+                json.dumps(key_data)
+            )
+        except Exception as e:
+            # Keychain同步失败不影响主要功能
+            print(f"⚠️ Keychain同步失败: {e}")
