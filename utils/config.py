@@ -29,7 +29,6 @@ class AppConfig:
     # UI设置
     show_password_strength: bool = True
     use_colors: bool = True
-    page_size: int = 10
     
     # 存储设置
     storage_path: Optional[str] = None
@@ -201,8 +200,7 @@ class ConfigManager:
             ],
             "界面设置": [
                 "show_password_strength",
-                "use_colors",
-                "page_size"
+                "use_colors"
             ],
             "存储设置": [
                 "storage_path",
@@ -256,10 +254,6 @@ class ConfigManager:
                 print("❌ 最大认证尝试次数必须大于0")
                 return False
             
-            # 检查页面大小
-            if self.config.page_size <= 0:
-                print("❌ 页面大小必须大于0")
-                return False
             
             # 检查备份数量
             if self.config.backup_count < 0:

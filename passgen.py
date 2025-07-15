@@ -47,19 +47,77 @@ def get_auth_manager():
 def cli(ctx, length, no_uppercase, no_lowercase, no_digits, no_symbols, custom_symbols, exclude, count, no_save):
     """🔐 PassGen - 密码生成器和管理器
 
-    安全的密码生成和管理工具，支持 Touch ID 认证。
+    现代化的密码生成和管理工具，支持 Touch ID 认证、AES-256 加密存储。
 
-    主要功能：生成密码、加密存储、智能搜索、序号操作。
+    ✨ 主要功能：
+    • 🔑 智能密码生成：可自定义长度、字符集的安全密码
+    • 💾 加密存储：AES-GCM 加密，PBKDF2 密钥派生
+    • 👆 Touch ID 认证：便捷的生物识别认证，自动回退
+    • 🔍 智能搜索：支持网站名、用户名、标签、备注搜索
+    • 📋 剪贴板集成：自动复制，30秒后安全清除
+    • ⚡ 会话管理：5分钟会话缓存，减少重复认证
 
-    基本用法：
+    🚀 快速开始：
 
     \b
-    passgen                    # 生成密码
-    passgen list               # 查看密码库  
-    passgen search -c github   # 搜索并复制
-    passgen edit 1             # 编辑第1个条目
-    passgen config             # 查看/修改配置
-    passgen guide              # 查看详细使用指南
+    passgen init                         # 首次初始化（设置主密码）
+    passgen                              # 生成密码并自动复制到剪贴板
+    passgen list                         # 查看密码库（Touch ID 认证）
+
+    🔑 密码生成选项：
+
+    \b
+    passgen -l 20                        # 生成20位密码
+    passgen --count 3                    # 生成3个密码供选择
+    passgen --no-symbols                 # 不包含特殊字符
+    passgen --custom-symbols "!@#"       # 只使用指定特殊字符
+    passgen --exclude "0oO1lI"           # 排除容易混淆的字符
+    passgen --no-save                    # 仅显示不保存
+
+    🔍 搜索和复制：
+
+    \b
+    passgen search github                # 搜索包含"github"的条目
+    passgen search -c github             # 搜索并直接复制
+    passgen list -c 3                    # 直接复制第3个条目
+
+    ✏️ 管理操作：
+
+    \b
+    passgen add                          # 添加新密码条目
+    passgen edit 1                       # 编辑第1个条目
+    passgen delete 2                     # 删除第2个条目
+
+    ⚙️ 配置管理：
+
+    \b
+    passgen config                       # 查看当前配置
+    passgen config --show                # 显示当前配置
+    passgen config --reset               # 重置所有配置到默认值
+    passgen config --session-timeout 600    # 设置会话超时为10分钟
+    passgen config --clipboard-timeout 60   # 设置剪贴板1分钟后清除
+    passgen config --password-length 20     # 设置默认密码长度
+    passgen config --symbols "!@#$%"        # 设置默认特殊字符集
+
+    📊 状态和系统：
+
+    \b
+    passgen status                       # 查看认证状态和会话信息
+
+    🔄 系统重置：
+
+    \b
+    passgen reset                        # 完全重置（数据库+钥匙串+配置）
+    passgen reset --config-only          # 仅重置配置文件
+    passgen reset --force                # 跳过确认直接重置
+
+    💡 小贴士：
+    • 首次认证后，在会话超时时间内无需重复 Touch ID 认证
+    • 使用序号（1,2,3...）而不是复杂ID来操作密码条目
+    • 密码自动复制到剪贴板，并在30秒后自动清除
+    • 所有数据使用 AES-256 加密存储
+
+    使用 'passgen <command> --help' 查看特定命令的详细选项。
     """
     if ctx.invoked_subcommand is None:
         # 默认行为：生成密码
@@ -242,9 +300,8 @@ def init():
 
 @cli.command()
 @click.option('-q', '--query', help='搜索关键词')
-@click.option('-p', '--page', type=int, default=1, help='页码')
 @click.option('-c', '--copy', type=int, help='直接复制指定序号的密码')
-def list(query, page, copy):
+def list(query, copy):
     """📋 列出密码库中的所有条目"""
     try:
         # 使用增强认证
@@ -285,27 +342,18 @@ def list(query, page, copy):
             console.print("📭 没有找到密码条目")
             return
         
-        # 分页显示
-        config_manager = ConfigManager()
-        page_size = config_manager.get('page_size', 10)
-        
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        page_entries = entries[start_idx:end_idx]
-        
         # 创建表格
-        table = Table(title=f"密码条目 (第 {page} 页)")
+        table = Table(title="密码条目")
         table.add_column("#", style="dim", width=3)
         table.add_column("网站", style="green")
         table.add_column("用户名", style="yellow")
         table.add_column("更新时间", style="blue")
         table.add_column("标签", style="magenta")
         
-        # 计算实际的序号（考虑分页）
-        for idx, entry in enumerate(page_entries, 1):
-            actual_idx = start_idx + idx
+        # 显示所有条目
+        for idx, entry in enumerate(entries, 1):
             table.add_row(
-                str(actual_idx),
+                str(idx),
                 entry.site,
                 entry.username or "-",
                 entry.updated_at[:10],
@@ -314,10 +362,8 @@ def list(query, page, copy):
         
         console.print(table)
         
-        # 显示分页信息
-        total_pages = (len(entries) + page_size - 1) // page_size
-        if total_pages > 1:
-            console.print(f"📄 第 {page}/{total_pages} 页，共 {len(entries)} 条记录")
+        # 显示总记录数
+        console.print(f"📊 共 {len(entries)} 条记录")
         
         # 询问是否要选择条目查看详情
         if entries:
@@ -718,9 +764,8 @@ def status():
 @click.option('--session-timeout', type=int, help='设置会话超时时间（秒）')
 @click.option('--clipboard-timeout', type=int, help='设置剪贴板自动清除时间（秒）')
 @click.option('--password-length', type=int, help='设置默认密码长度')
-@click.option('--page-size', type=int, help='设置列表页面大小')
 @click.option('--symbols', type=str, help='设置默认特殊字符集')
-def config(show, reset, session_timeout, clipboard_timeout, password_length, page_size, symbols):
+def config(show, reset, session_timeout, clipboard_timeout, password_length, symbols):
     """⚙️ 配置管理（显示、修改配置选项）"""
     global _auth_manager
     
@@ -772,14 +817,6 @@ def config(show, reset, session_timeout, clipboard_timeout, password_length, pag
                 console.print("❌ 密码长度必须大于0", style="red")
                 return
         
-        if page_size is not None:
-            if page_size > 0:
-                config_manager.set('page_size', page_size)
-                console.print(f"✅ 页面大小已设置为 {page_size}")
-                updated = True
-            else:
-                console.print("❌ 页面大小必须大于0", style="red")
-                return
         
         if symbols is not None:
             if len(symbols) > 0:
@@ -812,8 +849,7 @@ def config(show, reset, session_timeout, clipboard_timeout, password_length, pag
             }
             
             ui_config = {
-                "显示密码强度": "是" if config_dict.get('show_password_strength', True) else "否",
-                "页面大小": f"{config_dict.get('page_size', 10)} 条/页"
+                "显示密码强度": "是" if config_dict.get('show_password_strength', True) else "否"
             }
             
             console.print("\n🔒 安全设置:")
@@ -836,80 +872,91 @@ def config(show, reset, session_timeout, clipboard_timeout, password_length, pag
     except Exception as e:
         console.print(f"❌ 错误: {e}", style="red")
 
-@cli.command()
-def guide():
-    """📚 显示详细使用指南和示例"""
-    console.print("""
-[bold blue]🔐 PassGen 详细使用指南[/bold blue]
-
-[bold yellow]🚀 快速开始：[/bold yellow]
-  passgen init                         # 首次初始化（设置主密码）
-  passgen                              # 生成密码并自动复制到剪贴板
-  passgen list                         # 查看密码库（Touch ID 认证）
-
-[bold yellow]🔑 密码生成：[/bold yellow]
-  passgen -l 20                        # 生成20位密码
-  passgen --count 3                    # 生成3个密码供选择
-  passgen --no-symbols                 # 不包含特殊字符
-  passgen --custom-symbols "!@#"       # 只使用指定特殊字符
-  passgen --exclude "0oO1lI"           # 排除容易混淆的字符
-
-[bold yellow]🔍 搜索和复制：[/bold yellow]
-  passgen search github                # 搜索包含"github"的条目
-  passgen search -c github             # 搜索并直接复制（单结果时）
-  passgen list -c 3                    # 直接复制第3个条目
-
-[bold yellow]✏️ 管理操作：[/bold yellow]
-  passgen add                          # 添加新密码条目
-  passgen edit 1                       # 编辑第1个条目
-  passgen delete 2                     # 删除第2个条目
-
-[bold yellow]⚙️ 配置管理：[/bold yellow]
-  passgen config                       # 查看当前配置
-  passgen config --session-timeout 600 # 设置会话超时为10分钟
-  passgen config --clipboard-timeout 60 # 设置剪贴板1分钟后清除
-  passgen config --password-length 20  # 设置默认密码长度
-  passgen config --symbols "!@#$%"     # 设置默认特殊字符集
-
-[bold yellow]📊 状态查看：[/bold yellow]
-  passgen status                       # 查看认证状态和会话信息
-
-[bold green]💡 小贴士：[/bold green]
-  • 首次认证后，在会话超时时间内无需重复 Touch ID 认证
-  • 使用序号（1,2,3...）而不是复杂ID来操作密码条目
-  • 密码自动复制到剪贴板，并在30秒后自动清除
-  • 所有数据使用 AES-256 加密存储
-""")
 
 @cli.command()
+@click.option('--config-only', is_flag=True, help='仅重置配置文件，不清理数据库和钥匙串')
 @click.option('--force', is_flag=True, help='强制重置，不需要确认')
-def reset_config(force):
-    """🔧 重置配置文件到默认值（已弃用，请使用 'passgen config --reset'）"""
-    console.print("⚠️  此命令已弃用，请使用 'passgen config --reset'", style="yellow")
-    console.print("💡 提示：运行 'passgen config --help' 查看新的配置管理功能")
+def reset(config_only, force):
+    """🔄 完全重置 PassGen（清理数据库、钥匙串、配置文件）"""
+    global _auth_manager
     
-    # 为了向后兼容，仍然执行重置操作
     try:
-        config_manager = ConfigManager()
+        if config_only:
+            # 仅重置配置文件
+            config_manager = ConfigManager()
+            
+            if not force:
+                if not Confirm.ask("⚠️  确定要重置配置文件到默认值吗？"):
+                    console.print("❌ 已取消重置")
+                    return
+            
+            config_manager.reset_to_defaults()
+            console.print("✅ 配置文件已重置到默认值")
+            
+            # 重新加载全局认证管理器
+            _auth_manager = None
+            return
         
+        # 完全重置
         if not force:
-            if not Confirm.ask("⚠️  确定要重置配置文件到默认值吗？"):
+            console.print("⚠️  [bold red]警告：此操作将完全清理 PassGen 的所有本地数据！[/bold red]")
+            console.print("\n将要清理的内容：")
+            console.print("  • 数据库文件 (~/.passgen.db)")
+            console.print("  • 钥匙串中的主密码")
+            console.print("  • 配置文件 (~/.passgen_config.json)")
+            console.print("  • 当前会话状态")
+            console.print("\n💡 如果使用 iCloud 同步，原始数据库文件仍在 iCloud 中保留")
+            
+            if not Confirm.ask("\n确定要继续重置吗？"):
                 console.print("❌ 已取消重置")
                 return
         
-        # 重置配置
-        config_manager.reset_to_defaults()
+        console.print("🔄 开始重置 PassGen...")
         
-        console.print("✅ 配置文件已重置到默认值")
-        console.print("📋 当前配置：")
+        # 1. 清理钥匙串中的密码
+        try:
+            import subprocess
+            result = subprocess.run([
+                'security', 'delete-generic-password', 
+                '-s', 'PassGen', 
+                '-a', 'master_password_encrypted'
+            ], capture_output=True, text=True)
+            console.print("✅ 已清理钥匙串中的主密码")
+        except Exception:
+            console.print("ℹ️  钥匙串中无主密码或清理失败（可能已经是空的）")
         
-        # 显示配置
-        config_dict = config_manager.get_config_dict()
-        for key, value in config_dict.items():
-            console.print(f"  {key}: {value}")
+        # 2. 删除数据库文件
+        import os
+        from pathlib import Path
+        
+        db_path = Path.home() / ".passgen.db"
+        if db_path.exists():
+            # 检查是否是软链接
+            if db_path.is_symlink():
+                console.print(f"ℹ️  检测到软链接: {db_path} -> {db_path.readlink()}")
+                console.print("💡 将删除软链接，但保留 iCloud 中的原始文件")
             
+            os.remove(db_path)
+            console.print("✅ 已删除数据库文件")
+        else:
+            console.print("ℹ️  数据库文件不存在")
+        
+        # 3. 重置配置文件
+        config_manager = ConfigManager()
+        config_manager.reset_to_defaults()
+        console.print("✅ 配置文件已重置到默认值")
+        
+        # 4. 清理全局会话状态
+        _auth_manager = None
+        console.print("✅ 会话状态已清理")
+        
+        console.print("\n🎉 PassGen 重置完成！")
+        console.print("\n💡 接下来可以：")
+        console.print("  • 运行 'passgen init' 重新初始化")
+        console.print("  • 或设置 iCloud 同步链接到现有数据库")
+        
     except Exception as e:
-        console.print(f"❌ 错误: {e}", style="red")
+        console.print(f"❌ 重置过程中出现错误: {e}", style="red")
 
 if __name__ == "__main__":
     cli()

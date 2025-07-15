@@ -11,16 +11,65 @@
 - 📋 **剪贴板集成**：自动复制，30秒后安全清除
 - ⚡ **会话管理**：5分钟会话缓存，减少重复认证
 
-## 🚀 快速开始
+## 📋 系统要求
 
-### 1. 安装依赖
+- **操作系统**：macOS 10.13+ （Touch ID 功能需要支持 Touch ID 的 Mac）
+- **Python**：Python 3.8 或更高版本
+- **依赖**：自动安装脚本会检查并安装所需依赖
 
+**如果没有 Python**：
 ```bash
-# 安装 Python 依赖
-pip install -r requirements.txt
+# 使用 Homebrew 安装（推荐）
+brew install python@3.11
+
+# 或从官网下载安装
+# https://www.python.org/downloads/
 ```
 
-### 2. 初始化
+## 🚀 快速开始
+
+### 方法1：自动安装（推荐）
+
+```bash
+# 克隆项目
+git clone <repository-url> pass-gen
+cd pass-gen
+
+# 运行自动安装脚本
+./install.sh
+```
+
+自动安装脚本会：
+- 检查 Python 3.8+ 环境
+- 自动创建虚拟环境
+- 安装所有依赖
+- 设置 PATH 环境变量
+- 测试安装结果
+
+### 方法2：手动安装
+
+```bash
+# 克隆项目
+git clone <repository-url> pass-gen
+cd pass-gen
+
+# 创建虚拟环境
+python3 -m venv venv
+source venv/bin/activate
+
+# 安装 Python 依赖
+pip install -r requirements.txt
+
+# 设置可执行权限
+chmod +x scripts/passgen
+chmod +x passgen.py
+
+# 添加到 PATH（可选）
+echo 'export PATH="$(pwd)/scripts:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+### 初始化
 
 ```bash
 # 初始化密码管理器（首次使用）
@@ -29,7 +78,7 @@ passgen init
 # 设置主密码，Touch ID 将自动启用
 ```
 
-### 3. 开始使用
+### 开始使用
 
 ```bash
 # 生成密码（默认功能）
@@ -98,9 +147,14 @@ passgen config --password-length 20    # 设置默认密码长度为20
 passgen config --symbols "!@#$%"       # 设置默认特殊字符集
 passgen config --reset                 # 重置所有配置到默认值
 
-# 重置配置文件（已弃用，请使用 config --reset）
-passgen reset-config
-passgen reset-config --force  # 跳过确认
+# 系统重置
+passgen reset                       # 完全重置（数据库+钥匙串+配置）
+passgen reset --config-only         # 仅重置配置文件
+passgen reset --force               # 跳过确认直接重置
+
+# 获取帮助
+passgen --help                      # 查看详细使用指南和所有命令
+passgen <command> --help            # 查看特定命令的详细选项
 ```
 
 ## 🔒 安全特性
@@ -116,6 +170,8 @@ passgen reset-config --force  # 跳过确认
 
 ```
 pass-gen/
+├── install.sh              # 自动安装脚本
+├── uninstall.sh            # 卸载脚本
 ├── passgen.py              # 主程序（统一CLI工具）
 ├── scripts/passgen         # 启动脚本
 ├── core/
@@ -153,8 +209,7 @@ PassGen 使用以下文件存储数据：
   "default_symbols": "!@#$%^&*()_+-=[]{}|;:,.<>?",
   "session_timeout_seconds": 300,
   "auto_clear_clipboard_seconds": 30,
-  "show_password_strength": true,
-  "page_size": 10
+  "show_password_strength": true
 }
 ```
 
@@ -331,7 +386,10 @@ cp ~/.passgen.db ~/Documents/passgen_backup_$(date +%Y%m%d).db
 3. **重新认证**：删除旧数据重新初始化
 
 ```bash
-# 清理并重新初始化（仅限单设备使用）
+# 方法1：使用 reset 命令（推荐）
+passgen reset  # 完全重置，包括数据库、钥匙串、配置
+
+# 方法2：手动清理（仅限单设备使用）
 rm ~/.passgen.db
 passgen init
 
@@ -353,9 +411,49 @@ pip install -r requirements.txt
 
 ```bash
 # 重新开始（会丢失所有数据）
-rm ~/.passgen.db
-passgen init
+passgen reset  # 或手动: rm ~/.passgen.db && passgen init
 ```
+
+### 测试第二台电脑流程
+
+在当前电脑上模拟第二台电脑的设置流程：
+
+```bash
+# 1. 完全重置当前环境
+passgen reset
+
+# 2. 确认 iCloud 文件存在
+ls -la "$HOME/Library/Mobile Documents/com~apple~CloudDocs/important/passgen/.passgen.db"
+
+# 3. 按照第二台 Mac 设置流程
+ln -s "$HOME/Library/Mobile Documents/com~apple~CloudDocs/important/passgen/.passgen.db" ~/.passgen.db
+
+# 4. 测试访问（输入原来的主密码）
+passgen list
+
+# 5. 恢复正常使用
+passgen status  # 验证 Touch ID 状态
+```
+
+### 完全卸载 PassGen
+
+如果需要完全移除 PassGen：
+
+```bash
+# 方法1：使用卸载脚本（推荐）
+./uninstall.sh
+
+# 方法2：手动卸载
+passgen reset          # 清理所有数据
+cd ..                   # 退出项目目录
+rm -rf pass-gen         # 删除项目目录
+```
+
+卸载脚本会清理：
+- PassGen 程序文件
+- 密码数据库和配置文件
+- 钥匙串中的主密码
+- PATH 环境变量配置
 
 ### iCloud 同步问题
 
