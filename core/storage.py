@@ -463,7 +463,7 @@ class SecureStorage:
     def _load_encrypted_data(self, master_password: str) -> Dict[str, Any]:
         """加载并解密数据"""
         if not self.storage_path.exists():
-            raise FileNotFoundError("存储文件不存在")
+            raise FileNotFoundError("数据库文件不存在，请先运行 'passgen init' 进行初始化")
         
         with open(self.storage_path, 'rb') as f:
             # 读取文件头

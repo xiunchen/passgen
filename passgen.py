@@ -881,6 +881,21 @@ def reset(config_only, force):
     global _auth_manager
     
     try:
+        # 对于非仅配置的重置，需要认证确认身份
+        if not config_only:
+            # 检查是否已初始化
+            if not check_initialization():
+                return
+                
+            # 需要认证才能进行完全重置
+            auth_manager = get_auth_manager()
+            auth_result = auth_manager.authenticate()
+            
+            if not auth_result.success:
+                console.print(f"❌ 认证失败: {auth_result.error_message}", style="red")
+                console.print("💡 完全重置需要身份验证以确保安全")
+                return
+        
         if config_only:
             # 仅重置配置文件
             config_manager = ConfigManager()

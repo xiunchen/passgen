@@ -274,8 +274,9 @@ class EnhancedAuthManager:
                 else:
                     # 其他错误，返回相应的错误信息
                     error_messages = {
-                        "NO_DATABASE": "数据库文件不存在",
-                        "NO_KEYCHAIN_DATA": "首次使用此设备，密码验证失败",
+                        "NO_DATABASE": "数据库文件不存在，请先运行 'passgen init' 初始化",
+                        "NOT_INITIALIZED": "PassGen 尚未初始化，请先运行 'passgen init'",
+                        "UNSUPPORTED_FORMAT": "不支持的数据库格式",
                         "DATABASE_CORRUPTION": "数据库文件可能已损坏",
                         "WRONG_PASSWORD": "密码错误",
                         "UNKNOWN_ERROR": "认证过程中发生未知错误"
@@ -374,34 +375,34 @@ class EnhancedAuthManager:
         """诊断认证失败的具体原因"""
         try:
             from pathlib import Path
+            from core.storage import SecureStorage
             
             # 检查数据库文件是否存在
             db_path = Path.home() / ".passgen.db"
             if not db_path.exists():
                 return "NO_DATABASE"
             
-            # 检查钥匙串中是否有主密钥数据
+            # 检查是否已初始化
             try:
-                master_key_data = keyring.get_password(self.SERVICE_NAME, self.MASTER_KEY)
-                if not master_key_data:
-                    return "NO_KEYCHAIN_DATA"
-            except Exception:
-                return "NO_KEYCHAIN_DATA"
-            
-            # 检查数据库文件格式
-            try:
-                with open(db_path, 'rb') as f:
-                    data = f.read(64)  # 读取前64字节
-                    if len(data) < 32:
-                        return "DATABASE_CORRUPTION"
+                storage = SecureStorage()
+                if not storage.is_initialized():
+                    return "NOT_INITIALIZED"
             except Exception:
                 return "DATABASE_CORRUPTION"
             
-            # 检查是否可能是盐值不匹配
-            if self._likely_salt_mismatch():
-                return "SALT_MISMATCH"
-            
-            return "WRONG_PASSWORD"
+            # 检查文件格式
+            try:
+                with open(db_path, 'rb') as f:
+                    version = f.read(4)
+                    # 新格式文件以 "PGv2" 开头
+                    if version == b"PGv2":
+                        # 新格式文件不需要Keychain数据即可验证密码
+                        return "WRONG_PASSWORD"
+                    else:
+                        # 不支持的格式
+                        return "UNSUPPORTED_FORMAT"
+            except Exception:
+                return "DATABASE_CORRUPTION"
             
         except Exception:
             return "UNKNOWN_ERROR"
