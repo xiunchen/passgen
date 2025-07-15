@@ -489,23 +489,63 @@ def search(query, copy):
                 console.print("❌ 未选择有效的条目", style="red")
                 return
         
-        # 正常显示搜索结果（不复制）
+        # 正常显示搜索结果（支持交互选择）
         table = Table(title=f"搜索结果: '{query}'")
         table.add_column("#", style="dim", width=3)
         table.add_column("网站", style="green")
         table.add_column("用户名", style="yellow")
         table.add_column("更新时间", style="blue")
+        table.add_column("标签", style="magenta")
         
         for idx, entry in enumerate(entries, 1):
             table.add_row(
                 str(idx),
                 entry.site,
                 entry.username or "-",
-                entry.updated_at[:10]
+                entry.updated_at[:10],
+                ", ".join(entry.tags) if entry.tags else "-"
             )
         
         console.print(table)
         console.print(f"📊 找到 {len(entries)} 条匹配记录")
+        
+        # 询问是否要选择条目查看详情
+        if entries:
+            console.print("\n💡 提示：输入序号(#)查看密码并复制，输入 q 退出")
+            try:
+                choice = Prompt.ask("选择", default="q")
+                if choice.lower() != 'q':
+                    selected_entry = None
+                    
+                    # 按序号选择
+                    if choice.isdigit():
+                        idx = int(choice)
+                        if 1 <= idx <= len(entries):
+                            selected_entry = entries[idx - 1]
+                    
+                    if selected_entry:
+                        # 显示密码详情
+                        password = storage.get_password(selected_entry.id, auth_result.password)
+                        if password:
+                            console.print(f"\n🔐 {password.site}")
+                            console.print(f"👤 用户名: {password.username or '无'}")
+                            
+                            # 自动复制密码
+                            clipboard = SecureClipboard()
+                            clipboard.copy_password(password.password, show_notification=False)
+                            console.print("✅ 密码已复制到剪贴板")
+                            
+                            if password.notes:
+                                console.print(f"📝 备注: {password.notes}")
+                            
+                            if password.tags:
+                                console.print(f"🏷️  标签: {', '.join(password.tags)}")
+                        else:
+                            console.print("❌ 获取密码失败", style="red")
+                    else:
+                        console.print("❌ 无效选择", style="red")
+            except EOFError:
+                pass
         
     except Exception as e:
         console.print(f"❌ 错误: {e}", style="red")
