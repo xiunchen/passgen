@@ -251,6 +251,10 @@ def generate_password(length, no_uppercase, no_lowercase, no_digits, no_symbols,
 def save_password(password):
     """保存密码到数据库"""
     try:
+        # 检查是否已初始化
+        if not check_initialization():
+            return
+        
         # 使用增强认证
         auth_manager = get_auth_manager()
         auth_result = auth_manager.authenticate()
@@ -287,9 +291,39 @@ def init():
     try:
         storage = SecureStorage()
         
-        if storage.is_initialized():
-            console.print("❌ 密码管理器已经初始化", style="red")
-            return
+        # 检查数据库文件是否存在
+        if storage.storage_path.exists():
+            console.print("⚠️  检测到已存在的数据库文件", style="yellow")
+            
+            # 检查是否为有效的PassGen数据库
+            try:
+                with open(storage.storage_path, 'rb') as f:
+                    version = f.read(storage.VERSION_SIZE)
+                    if version == storage.FILE_VERSION:
+                        console.print("💡 这似乎是一个有效的 PassGen 数据库文件")
+                        console.print("🔍 如果这是您的备份文件，请使用原始密码")
+                        console.print("🗑️  如果您想重新开始，请先运行 'passgen reset --force'")
+                        return
+            except:
+                pass
+            
+            console.print("🗂️  现有文件格式无法识别，将被覆盖")
+            if not Confirm.ask("确定要继续并覆盖现有文件吗？"):
+                console.print("❌ 已取消初始化")
+                return
+        
+        # 额外检查：如果 Keychain 中有密码但文件不存在，可能是文件被删除
+        try:
+            import keyring
+            existing_password = keyring.get_password("PassGen", "master_password_encrypted")
+            if existing_password is not None:
+                console.print("🔑 检测到 Keychain 中有现有的主密码")
+                console.print("💡 这表明之前已经初始化过，数据库文件可能被删除")
+                if not Confirm.ask("确定要重新初始化并覆盖现有认证信息吗？"):
+                    console.print("❌ 已取消初始化")
+                    return
+        except:
+            pass
         
         console.print("🔧 初始化密码管理器...")
         
@@ -321,6 +355,10 @@ def init():
 def list(query, copy):
     """📋 列出密码库中的所有条目"""
     try:
+        # 检查是否已初始化
+        if not check_initialization():
+            return
+        
         # 使用增强认证
         auth_manager = get_auth_manager()
         auth_result = auth_manager.authenticate()
@@ -428,6 +466,10 @@ def list(query, copy):
 def search(query, copy):
     """🔎 搜索密码条目（支持网站名、用户名、标签、备注）"""
     try:
+        # 检查是否已初始化
+        if not check_initialization():
+            return
+        
         # 使用增强认证
         auth_manager = get_auth_manager()
         auth_result = auth_manager.authenticate()
@@ -554,6 +596,10 @@ def search(query, copy):
 def add():
     """➕ 添加新的密码条目到密码库"""
     try:
+        # 检查是否已初始化
+        if not check_initialization():
+            return
+        
         # 使用增强认证（只认证一次）
         auth_manager = get_auth_manager()
         auth_result = auth_manager.authenticate()
@@ -649,6 +695,10 @@ def add():
 def edit(sequence_number):
     """✏️ 编辑指定序号的密码条目"""
     try:
+        # 检查是否已初始化
+        if not check_initialization():
+            return
+        
         # 使用增强认证
         auth_manager = get_auth_manager()
         auth_result = auth_manager.authenticate()
@@ -764,6 +814,10 @@ def edit(sequence_number):
 def delete(sequence_number):
     """🗑️ 删除指定序号的密码条目（需要确认）"""
     try:
+        # 检查是否已初始化
+        if not check_initialization():
+            return
+        
         # 使用增强认证
         auth_manager = get_auth_manager()
         auth_result = auth_manager.authenticate()
@@ -1038,20 +1092,32 @@ def reset(config_only, force):
     global _auth_manager
     
     try:
-        # 对于非仅配置的重置，需要认证确认身份
+        # 对于非仅配置的重置，检查是否需要认证
         if not config_only:
-            # 检查是否已初始化
-            if not check_initialization():
-                return
+            # 检查是否已完全初始化
+            if check_initialization():
+                # 已完全初始化，需要认证才能进行完全重置
+                auth_manager = get_auth_manager()
+                auth_result = auth_manager.authenticate()
                 
-            # 需要认证才能进行完全重置
-            auth_manager = get_auth_manager()
-            auth_result = auth_manager.authenticate()
-            
-            if not auth_result.success:
-                console.print(f"❌ 认证失败: {auth_result.error_message}", style="red")
-                console.print("💡 完全重置需要身份验证以确保安全")
-                return
+                if not auth_result.success:
+                    console.print(f"❌ 认证失败: {auth_result.error_message}", style="red")
+                    console.print("💡 完全重置需要身份验证以确保安全")
+                    return
+            else:
+                # 未完全初始化（可能是孤立数据库），在force模式下允许重置
+                if not force:
+                    from pathlib import Path
+                    db_path = Path.home() / ".passgen.db"
+                    if db_path.exists():
+                        console.print("⚠️  检测到孤立的数据库文件（Keychain中无认证信息）", style="yellow")
+                        console.print("💡 这可能是残留文件，可以安全删除")
+                        if not Confirm.ask("确定要删除孤立的数据库文件吗？"):
+                            console.print("❌ 已取消重置")
+                            return
+                    else:
+                        console.print("❌ 没有需要重置的数据", style="red")
+                        return
         
         if config_only:
             # 仅重置配置文件

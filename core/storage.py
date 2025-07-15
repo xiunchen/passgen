@@ -140,15 +140,69 @@ class SecureStorage:
             return False
     
     def is_initialized(self) -> bool:
-        """检查是否已初始化"""
+        """
+        检查是否已完全初始化
+        
+        检查项目：
+        1. 数据库文件是否存在
+        2. 文件格式是否正确
+        3. Keychain中是否有对应的认证数据
+        4. 数据库结构是否完整
+        """
+        # 1. 检查文件是否存在
         if not self.storage_path.exists():
             return False
         
         try:
+            # 2. 检查文件格式
             with open(self.storage_path, 'rb') as f:
                 version = f.read(self.VERSION_SIZE)
-                return version == self.FILE_VERSION
-        except:
+                if version != self.FILE_VERSION:
+                    return False
+                
+                # 检查文件大小是否足够（至少包含完整的文件头）
+                f.seek(0, 2)  # 移动到文件末尾
+                file_size = f.tell()
+                if file_size < self.HEADER_SIZE:
+                    return False
+            
+            # 3. 检查Keychain中是否有认证数据
+            # 主要检查主密码是否存在（用于Touch ID），这是最关键的认证信息
+            try:
+                master_password = keyring.get_password(self.SERVICE_NAME, "master_password_encrypted")
+                
+                # 如果主密码不存在，说明可能是残留文件或未完成初始化
+                # 注意：master_key (盐值数据) 可能存在，但没有主密码就无法进行Touch ID认证
+                if master_password is None:
+                    return False
+                    
+            except Exception:
+                # Keychain访问失败，也视为未初始化
+                # 因为无法进行正常的Touch ID认证
+                return False
+            
+            # 4. 验证数据库结构完整性
+            try:
+                with open(self.storage_path, 'rb') as f:
+                    f.read(self.VERSION_SIZE)  # 版本
+                    verify_salt = f.read(self.VERIFY_SALT_SIZE)  # 验证盐值
+                    verify_hash = f.read(self.VERIFY_HASH_SIZE)  # 验证哈希
+                    encrypt_salt = f.read(self.ENCRYPT_SALT_SIZE)  # 加密盐值
+                    nonce = f.read(self.NONCE_SIZE)  # nonce
+                    
+                    # 检查关键组件是否存在
+                    if (len(verify_salt) != self.VERIFY_SALT_SIZE or 
+                        len(verify_hash) != self.VERIFY_HASH_SIZE or
+                        len(encrypt_salt) != self.ENCRYPT_SALT_SIZE or
+                        len(nonce) != self.NONCE_SIZE):
+                        return False
+                        
+            except Exception:
+                return False
+            
+            return True
+            
+        except Exception:
             return False
     
     def verify_master_password(self, master_password: str) -> bool:

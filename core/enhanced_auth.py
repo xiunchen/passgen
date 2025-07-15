@@ -276,6 +276,7 @@ class EnhancedAuthManager:
                     error_messages = {
                         "NO_DATABASE": "数据库文件不存在，请先运行 'passgen init' 初始化",
                         "NOT_INITIALIZED": "PassGen 尚未初始化，请先运行 'passgen init'",
+                        "ORPHANED_DATABASE": "检测到残留数据库文件，请重新运行 'passgen init' 进行初始化",
                         "UNSUPPORTED_FORMAT": "不支持的数据库格式",
                         "DATABASE_CORRUPTION": "数据库文件可能已损坏",
                         "WRONG_PASSWORD": "密码错误",
@@ -396,6 +397,9 @@ class EnhancedAuthManager:
                     version = f.read(4)
                     # 新格式文件以 "PGv2" 开头
                     if version == b"PGv2":
+                        # 检查是否为残留文件（文件存在但Keychain中没有认证信息）
+                        if self._detect_orphaned_database():
+                            return "ORPHANED_DATABASE"
                         # 新格式文件不需要Keychain数据即可验证密码
                         return "WRONG_PASSWORD"
                     else:
@@ -406,6 +410,19 @@ class EnhancedAuthManager:
             
         except Exception:
             return "UNKNOWN_ERROR"
+    
+    def _detect_orphaned_database(self) -> bool:
+        """检测是否为孤立数据库（文件存在但没有配套的认证信息）"""
+        try:
+            # 主要检查主密码是否存在，这是Touch ID认证的关键
+            master_password = keyring.get_password(self.SERVICE_NAME, "master_password_encrypted")
+            
+            # 如果主密码不存在，说明可能是残留文件或未完成初始化
+            return master_password is None
+            
+        except Exception:
+            # 如果无法访问Keychain，假设不是孤立文件
+            return False
     
     
     
