@@ -389,6 +389,60 @@ class SecureStorage:
         except:
             return False
     
+    def change_master_password(self, current_password: str, new_password: str) -> bool:
+        """
+        更改主密码
+        
+        Args:
+            current_password: 当前密码
+            new_password: 新密码
+            
+        Returns:
+            更改是否成功
+        """
+        try:
+            # 1. 验证当前密码
+            if not self.verify_master_password(current_password):
+                return False
+            
+            # 2. 读取所有数据
+            data = self._load_encrypted_data(current_password)
+            
+            # 3. 生成新的盐值和验证哈希
+            new_verify_salt = os.urandom(self.VERIFY_SALT_SIZE)
+            new_encrypt_salt = os.urandom(self.ENCRYPT_SALT_SIZE)
+            new_verify_hash = self._generate_verification_hash(new_password, new_verify_salt)
+            
+            # 4. 生成新的nonce
+            new_nonce = os.urandom(self.NONCE_SIZE)
+            
+            # 5. 用新密码加密数据
+            new_key = self._derive_key(new_password, new_encrypt_salt)
+            plaintext = json.dumps(data, ensure_ascii=False, indent=2).encode()
+            aesgcm = AESGCM(new_key)
+            new_ciphertext = aesgcm.encrypt(new_nonce, plaintext, None)
+            
+            # 6. 保存新的加密文件
+            with open(self.storage_path, 'wb') as f:
+                f.write(self.FILE_VERSION)
+                f.write(new_verify_salt)
+                f.write(new_verify_hash)
+                f.write(new_encrypt_salt)
+                f.write(new_nonce)
+                f.write(new_ciphertext)
+            
+            # 7. 设置文件权限
+            os.chmod(self.storage_path, 0o600)
+            
+            # 8. 同步新的盐值到Keychain
+            self._sync_to_keychain(new_verify_salt, new_encrypt_salt)
+            
+            return True
+            
+        except Exception as e:
+            print(f"更改主密码失败: {e}")
+            return False
+    
     def recover_from_file(self, file_path: str, password: str) -> bool:
         """
         从备份文件恢复（支持跨设备恢复）

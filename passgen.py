@@ -33,6 +33,21 @@ def get_auth_manager():
         _auth_manager = EnhancedAuthManager()
     return _auth_manager
 
+def check_initialization():
+    """检查PassGen是否已初始化，如果未初始化则提示用户"""
+    try:
+        storage = SecureStorage()
+        if not storage.is_initialized():
+            console.print("❌ PassGen 尚未初始化", style="red")
+            console.print("\n💡 请先运行以下命令进行初始化：")
+            console.print("   [bold green]passgen init[/bold green]")
+            console.print("\n这将设置主密码并创建加密数据库。")
+            return False
+        return True
+    except Exception as e:
+        console.print(f"❌ 检查初始化状态时出错: {e}", style="red")
+        return False
+
 @click.group(invoke_without_command=True)
 @click.pass_context
 @click.option('-l', '--length', type=int, help='密码长度')
@@ -87,6 +102,7 @@ def cli(ctx, length, no_uppercase, no_lowercase, no_digits, no_symbols, custom_s
     passgen add                          # 添加新密码条目
     passgen edit 1                       # 编辑第1个条目
     passgen delete 2                     # 删除第2个条目
+    passgen change-password              # 更改主密码
 
     ⚙️ 配置管理：
 
@@ -99,10 +115,11 @@ def cli(ctx, length, no_uppercase, no_lowercase, no_digits, no_symbols, custom_s
     passgen config --password-length 20     # 设置默认密码长度
     passgen config --symbols "!@#$%"        # 设置默认特殊字符集
 
-    📊 状态和系统：
+    📊 状态和安全：
 
     \b
     passgen status                       # 查看认证状态和会话信息
+    passgen change-password              # 更改主密码并重新加密数据
 
     🔄 系统重置：
 
@@ -738,6 +755,106 @@ def delete(sequence_number):
         else:
             console.print(f"❌ 删除失败", style="red")
         
+    except Exception as e:
+        console.print(f"❌ 错误: {e}", style="red")
+
+@cli.command(name='change-password')
+def change_password():
+    """🔐 更改主密码（需要输入当前密码验证）"""
+    try:
+        # 检查是否已初始化
+        if not check_initialization():
+            return
+        
+        console.print("🔐 更改主密码")
+        console.print("⚠️  警告：更改主密码将重新加密所有数据")
+        console.print("\n📝 步骤：")
+        console.print("  1. 验证当前密码")
+        console.print("  2. 设置新密码")
+        console.print("  3. 重新加密所有数据")
+        console.print("  4. 更新Touch ID关联的密码")
+        
+        # 确认继续
+        if not Confirm.ask("\n确定要继续吗？"):
+            console.print("❌ 已取消更改")
+            return
+        
+        storage = SecureStorage()
+        
+        # 步骤1：验证当前密码
+        console.print("\n🔑 步骤 1/4: 验证当前密码")
+        current_password = Prompt.ask("请输入当前主密码", password=True)
+        
+        if not storage.verify_master_password(current_password):
+            console.print("❌ 当前密码错误", style="red")
+            return
+        
+        console.print("✅ 当前密码验证成功")
+        
+        # 步骤2：设置新密码
+        console.print("\n🆕 步骤 2/4: 设置新密码")
+        
+        while True:
+            new_password = Prompt.ask("请输入新密码", password=True)
+            
+            if len(new_password) < 6:
+                console.print("❌ 新密码长度至少为6位", style="red")
+                continue
+                
+            if new_password == current_password:
+                console.print("❌ 新密码与当前密码相同", style="red")
+                continue
+            
+            confirm_password = Prompt.ask("请确认新密码", password=True)
+            
+            if new_password != confirm_password:
+                console.print("❌ 密码不匹配，请重新输入", style="red")
+                continue
+            
+            break
+        
+        console.print("✅ 新密码设置成功")
+        
+        # 步骤3：更改密码
+        console.print("\n🔄 步骤 3/4: 重新加密数据库...")
+        
+        with console.status("正在重新加密数据库..."):
+            success = storage.change_master_password(current_password, new_password)
+        
+        if not success:
+            console.print("❌ 更改密码失败", style="red")
+            return
+        
+        console.print("✅ 数据库重新加密成功")
+        
+        # 步骤4：更新Touch ID关联的密码
+        console.print("\n👆 步骤 4/4: 更新Touch ID关联密码...")
+        
+        try:
+            # 清除旧的Touch ID关联密码
+            auth_manager = get_auth_manager()
+            auth_manager._clear_invalid_password_from_keychain()
+            
+            # 保存新密码到Keychain（供 Touch ID 使用）
+            import keyring
+            keyring.set_password("PassGen", "master_password_encrypted", new_password)
+            
+            console.print("✅ Touch ID关联密码已更新")
+        except Exception as e:
+            console.print(f"⚠️  Touch ID更新失败: {e}", style="yellow")
+            console.print("💡 但主密码已成功更改，下次认证时请使用新密码")
+        
+        # 清除当前会话
+        global _auth_manager
+        if _auth_manager:
+            _auth_manager.clear_session()
+            _auth_manager = None
+        
+        console.print("\n🎉 主密码更改成功！")
+        console.print("💡 下次认证时请使用新密码")
+        
+    except KeyboardInterrupt:
+        console.print("\n❌ 用户取消操作", style="red")
     except Exception as e:
         console.print(f"❌ 错误: {e}", style="red")
 
