@@ -10,6 +10,7 @@
 - 🔍 **智能搜索**：支持网站名、用户名、标签、备注搜索
 - 📋 **剪贴板集成**：自动复制，30秒后安全清除
 - ⚡ **会话管理**：5分钟会话缓存，减少重复认证
+- ☁️ **iCloud 备份**：一键启用自动备份到 iCloud，支持数据恢复
 
 ## 📋 系统要求
 
@@ -147,11 +148,14 @@ passgen delete
 passgen status
 
 # 配置管理
-passgen config                      # 查看当前配置
+passgen config                         # 查看当前配置
 passgen config --session-timeout 600   # 设置会话超时为10分钟
 passgen config --clipboard-timeout 60  # 设置剪贴板1分钟后清除
 passgen config --password-length 20    # 设置默认密码长度为20
 passgen config --symbols "!@#$%"       # 设置默认特殊字符集
+passgen config --icloud-backup on      # 启用 iCloud 自动备份
+passgen config --icloud-backup off     # 禁用 iCloud 自动备份
+passgen config --icloud-path "/路径"   # 自定义 iCloud 备份路径
 passgen config --reset                 # 重置所有配置到默认值
 
 # 系统重置
@@ -216,9 +220,15 @@ PassGen 使用以下文件存储数据：
   "default_symbols": "!@#$%^&*()_+-=[]{}|;:,.<>?",
   "session_timeout_seconds": 300,
   "auto_clear_clipboard_seconds": 30,
-  "show_password_strength": true
+  "show_password_strength": true,
+  "icloud_backup_enabled": false,
+  "icloud_backup_path": null
 }
 ```
+
+**iCloud 备份配置说明**：
+- `icloud_backup_enabled`：是否启用 iCloud 自动备份（默认 `false`）
+- `icloud_backup_path`：自定义备份路径（默认 `null`，使用 `~/Library/Mobile Documents/com~apple~CloudDocs/PassGen/`）
 
 ### ⚡ 会话管理优化
 
@@ -257,11 +267,49 @@ passgen config --session-timeout 0
 passgen status
 ```
 
-### 📱 iCloud 实时同步设置
+### 📱 iCloud 备份与同步
 
-如果您希望在多台 Mac 之间同步密码库，可以使用 iCloud Drive：
+PassGen 支持多种 iCloud 备份方式，您可以根据需求选择：
 
-#### 方法1：移动到 iCloud Drive（推荐）
+#### 方法1：自动备份（推荐）
+
+最简单的方式，只需一行命令即可启用自动备份：
+
+```bash
+# 启用 iCloud 自动备份
+passgen config --icloud-backup on
+
+# 查看备份状态
+passgen config
+
+# 禁用自动备份
+passgen config --icloud-backup off
+
+# 自定义备份路径（可选）
+passgen config --icloud-path "~/Library/Mobile Documents/com~apple~CloudDocs/MyPasswords"
+```
+
+**工作原理**：
+- 启用后，每次添加、修改、删除密码时，数据库会自动复制到 iCloud
+- 默认备份路径：`~/Library/Mobile Documents/com~apple~CloudDocs/PassGen/passgen.db`
+- 本地数据库 `~/.passgen.db` 保持不变，iCloud 中是实时备份副本
+
+**从 iCloud 备份恢复**：
+
+如果本机数据库丢失，可以从 iCloud 备份恢复：
+
+```bash
+# 方法1：直接复制备份文件
+cp ~/Library/Mobile\ Documents/com~apple~CloudDocs/PassGen/passgen.db ~/.passgen.db
+chmod 600 ~/.passgen.db
+
+# 然后正常使用（使用原来的主密码）
+passgen list
+```
+
+#### 方法2：软链接同步（适合多设备实时同步）
+
+如果需要在多台 Mac 之间实时同步同一个数据库文件：
 
 ```bash
 # 1. 确保 iCloud Drive 已启用
@@ -281,7 +329,7 @@ ls -la ~/.passgen.db
 # 应该显示: ~/.passgen.db -> ~/Library/Mobile Documents/com~apple~CloudDocs/PassGen/.passgen.db
 ```
 
-#### 方法2：从新初始化到 iCloud
+#### 方法3：从新初始化到 iCloud
 
 ```bash
 # 1. 删除现有数据库（⚠️ 注意备份）
@@ -297,18 +345,31 @@ ln -s "$HOME/Library/Mobile Documents/com~apple~CloudDocs/PassGen/.passgen.db" ~
 passgen init
 ```
 
-#### 验证同步状态
+#### 验证同步/备份状态
 
 ```bash
+# 检查自动备份配置
+passgen config
+
 # 检查文件是否在 iCloud 中
 ls -la ~/Library/Mobile\ Documents/com~apple~CloudDocs/PassGen/
 
-# 检查软链接是否正确
+# 如果使用软链接方式，检查链接是否正确
 readlink ~/.passgen.db
 
-# 查看 iCloud 同步状态（文件名后应该有云朵图标）
+# 在 Finder 中查看（文件名后应该有云朵图标表示已同步）
 open ~/Library/Mobile\ Documents/com~apple~CloudDocs/PassGen/
 ```
+
+#### 方案对比
+
+| 特性 | 自动备份 | 软链接同步 |
+|------|----------|------------|
+| 设置难度 | 简单（一行命令） | 需要手动操作 |
+| 多设备实时同步 | 否（需手动恢复） | 是 |
+| 本地独立性 | 本地有完整副本 | 依赖 iCloud |
+| 离线使用 | 完全支持 | 可能受影响 |
+| 推荐场景 | 单设备备份 | 多设备同步 |
 
 ### 🔄 多设备使用详细指南
 
@@ -586,12 +647,19 @@ passgen list  # 输入主密码，Touch ID 将自动启用
 
 ## 📝 版本信息
 
-- **当前版本**：2.1
+- **当前版本**：2.2
 - **Python 要求**：3.8+
 - **系统要求**：macOS 10.13+ （Touch ID 功能）
 - **许可证**：MIT
 
 ### 更新日志
+
+**v2.2 (2026-02-03)**
+- ✅ 新增 iCloud 自动备份功能：`passgen config --icloud-backup on` 一键启用
+- ✅ 支持自定义备份路径：`passgen config --icloud-path "/路径"`
+- ✅ 每次密码操作后自动同步到 iCloud，无需手动配置软链接
+- ✅ 备份文件默认存储在 `~/Library/Mobile Documents/com~apple~CloudDocs/PassGen/`
+- ✅ 更新 README 文档，增加自动备份方案说明
 
 **v2.1 (2024-07-15)**
 - ✅ 修复会话管理问题：现在使用全局认证实例，避免每次操作都需要 Touch ID 认证

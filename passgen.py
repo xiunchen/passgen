@@ -1096,7 +1096,9 @@ def status():
 @click.option('--clipboard-timeout', type=int, help='设置剪贴板自动清除时间（秒）')
 @click.option('--password-length', type=int, help='设置默认密码长度')
 @click.option('--symbols', type=str, help='设置默认特殊字符集')
-def config(show, reset, session_timeout, clipboard_timeout, password_length, symbols):
+@click.option('--icloud-backup', type=click.Choice(['on', 'off']), help='启用/禁用 iCloud 自动备份')
+@click.option('--icloud-path', type=str, help='设置 iCloud 备份路径（默认: ~/Library/Mobile Documents/com~apple~CloudDocs/PassGen/）')
+def config(show, reset, session_timeout, clipboard_timeout, password_length, symbols, icloud_backup, icloud_path):
     """⚙️ 配置管理（显示、修改配置选项）"""
     global _auth_manager
     
@@ -1158,6 +1160,53 @@ def config(show, reset, session_timeout, clipboard_timeout, password_length, sym
                 console.print("❌ 特殊字符集不能为空", style="red")
                 return
         
+        if icloud_backup is not None:
+            from pathlib import Path
+            
+            if icloud_backup == 'on':
+                # 检查 iCloud Drive 是否可用
+                icloud_base = Path.home() / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
+                if not icloud_base.exists():
+                    console.print("❌ 未找到 iCloud Drive，请确保已登录 iCloud 并启用 iCloud Drive", style="red")
+                    return
+                
+                config_manager.set('icloud_backup_enabled', True)
+                console.print("✅ iCloud 自动备份已启用")
+                
+                # 显示当前备份路径
+                current_path = config_manager.get('icloud_backup_path')
+                if current_path:
+                    console.print(f"   备份路径: {current_path}")
+                else:
+                    default_path = icloud_base / "PassGen"
+                    console.print(f"   备份路径: {default_path} (默认)")
+                
+                updated = True
+            else:
+                config_manager.set('icloud_backup_enabled', False)
+                console.print("✅ iCloud 自动备份已禁用")
+                updated = True
+        
+        if icloud_path is not None:
+            from pathlib import Path
+            
+            # 验证路径
+            path = Path(icloud_path).expanduser()
+            
+            # 检查父目录是否存在
+            if not path.parent.exists():
+                console.print(f"❌ 路径不存在: {path.parent}", style="red")
+                return
+            
+            config_manager.set('icloud_backup_path', str(path))
+            console.print(f"✅ iCloud 备份路径已设置为: {path}")
+            
+            # 如果 iCloud 备份未启用，提示用户
+            if not config_manager.get('icloud_backup_enabled', False):
+                console.print("💡 提示：请运行 'passgen config --icloud-backup on' 启用 iCloud 备份")
+            
+            updated = True
+        
         # 如果没有指定任何选项，或者用户明确要求显示，则显示配置
         if show or (not reset and not updated):
             console.print("\n📋 当前配置：")
@@ -1183,6 +1232,21 @@ def config(show, reset, session_timeout, clipboard_timeout, password_length, sym
                 "显示密码强度": "是" if config_dict.get('show_password_strength', True) else "否"
             }
             
+            # iCloud 备份设置
+            from pathlib import Path
+            icloud_enabled = config_dict.get('icloud_backup_enabled', False)
+            icloud_path = config_dict.get('icloud_backup_path')
+            if not icloud_path:
+                icloud_path = str(Path.home() / "Library" / "Mobile Documents" / "com~apple~CloudDocs" / "PassGen")
+                icloud_path_display = f"{icloud_path} (默认)"
+            else:
+                icloud_path_display = icloud_path
+            
+            icloud_config = {
+                "iCloud 备份": "已启用" if icloud_enabled else "已禁用",
+                "备份路径": icloud_path_display if icloud_enabled else "-"
+            }
+            
             console.print("\n🔒 安全设置:")
             for key, value in security_config.items():
                 console.print(f"  {key}: {value}")
@@ -1193,6 +1257,10 @@ def config(show, reset, session_timeout, clipboard_timeout, password_length, sym
             
             console.print("\n🎨 界面设置:")
             for key, value in ui_config.items():
+                console.print(f"  {key}: {value}")
+            
+            console.print("\n☁️  iCloud 备份:")
+            for key, value in icloud_config.items():
                 console.print(f"  {key}: {value}")
             
             console.print(f"\n📁 配置文件: {config_manager.config_path}")

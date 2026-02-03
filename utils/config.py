@@ -34,6 +34,10 @@ class AppConfig:
     storage_path: Optional[str] = None
     backup_enabled: bool = True
     backup_count: int = 5
+    
+    # iCloud 备份设置
+    icloud_backup_enabled: bool = False
+    icloud_backup_path: Optional[str] = None  # 默认: ~/Library/Mobile Documents/com~apple~CloudDocs/PassGen/
 
 
 class ConfigManager:
@@ -206,6 +210,10 @@ class ConfigManager:
                 "storage_path",
                 "backup_enabled",
                 "backup_count"
+            ],
+            "iCloud 备份设置": [
+                "icloud_backup_enabled",
+                "icloud_backup_path"
             ]
         }
         

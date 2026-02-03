@@ -6,6 +6,8 @@
 
 import json
 import os
+import shutil
+import subprocess
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -132,6 +134,9 @@ class SecureStorage:
             
             # 同步盐值信息到Keychain（用于Touch ID集成）
             self._sync_to_keychain(verify_salt, encrypt_salt)
+            
+            # 同步到 iCloud（如果启用）
+            self._sync_to_icloud()
             
             return True
             
@@ -561,6 +566,9 @@ class SecureStorage:
             # 8. 同步新的盐值到Keychain
             self._sync_to_keychain(new_verify_salt, new_encrypt_salt)
             
+            # 9. 同步到 iCloud（如果启用）
+            self._sync_to_icloud()
+            
             return True
             
         except Exception as e:
@@ -609,6 +617,9 @@ class SecureStorage:
             encrypt_salt = backup_data[self.VERSION_SIZE + self.VERIFY_SALT_SIZE + self.VERIFY_HASH_SIZE:
                                       self.VERSION_SIZE + self.VERIFY_SALT_SIZE + self.VERIFY_HASH_SIZE + self.ENCRYPT_SALT_SIZE]
             self._sync_to_keychain(verify_salt, encrypt_salt)
+            
+            # 同步到 iCloud（如果启用）
+            self._sync_to_icloud()
             
             return True
             
@@ -699,6 +710,9 @@ class SecureStorage:
         
         # 设置文件权限
         os.chmod(self.storage_path, 0o600)
+        
+        # 同步到 iCloud（如果启用）
+        self._sync_to_icloud()
     
     def _sync_to_keychain(self, verify_salt: bytes, encrypt_salt: bytes):
         """同步盐值信息到Keychain（用于Touch ID集成）"""
@@ -718,3 +732,54 @@ class SecureStorage:
         except Exception as e:
             # Keychain同步失败不影响主要功能
             print(f"⚠️ Keychain同步失败: {e}")
+    
+    def _sync_to_icloud(self):
+        """
+        同步数据库文件到 iCloud
+        
+        从配置中读取 iCloud 备份设置，如果启用则复制数据库文件到 iCloud 目录。
+        备份失败不会影响主要功能（静默失败或仅警告）。
+        """
+        try:
+            # 延迟导入，避免循环依赖
+            from utils.config import ConfigManager
+            
+            config_manager = ConfigManager()
+            
+            # 检查是否启用 iCloud 备份
+            if not config_manager.get('icloud_backup_enabled', False):
+                return
+            
+            # 获取 iCloud 备份路径
+            icloud_path = config_manager.get('icloud_backup_path')
+            
+            # 如果未配置路径，使用默认的 iCloud Drive 路径
+            if not icloud_path:
+                icloud_base = Path.home() / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
+                icloud_path = icloud_base / "PassGen"
+            else:
+                icloud_path = Path(icloud_path)
+            
+            # 检查 iCloud Drive 是否存在
+            icloud_base = Path.home() / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
+            if not icloud_base.exists():
+                # iCloud Drive 不存在，跳过备份
+                return
+            
+            # 确保备份目录存在
+            icloud_path.mkdir(parents=True, exist_ok=True)
+            
+            # 复制数据库文件到 iCloud
+            backup_file = icloud_path / "passgen.db"
+            shutil.copy2(self.storage_path, backup_file)
+            
+            # 设置文件权限（仅用户可读写）
+            os.chmod(backup_file, 0o600)
+            
+            # 移除隐藏属性，确保文件在 Finder 中可见
+            subprocess.run(['chflags', 'nohidden', str(backup_file)], 
+                          capture_output=True, check=False)
+            
+        except Exception as e:
+            # iCloud 同步失败不影响主要功能，仅打印警告
+            print(f"⚠️ iCloud 同步失败: {e}")
