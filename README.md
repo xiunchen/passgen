@@ -125,7 +125,8 @@ passgen list -c 3
 
 # 搜索密码
 passgen search github
-passgen search -c github    # 搜索并复制
+passgen search gmail abc@gmail.com   # 网站名/用户名分别模糊搜索（AND）
+passgen search abc@gmail.com         # 单关键词同时搜网站名或用户名（OR）
 
 # 添加新密码（支持自动生成或手动输入）
 passgen add
@@ -133,8 +134,14 @@ passgen add
 # 编辑密码条目（使用序号）
 passgen edit 1
 
+# 不带序号时，列出条目并交互式选择编辑哪个
+passgen edit
+
 # 删除密码（使用序号）
 passgen delete 2
+
+# 不带序号时，列出条目并交互式选择删除哪个
+passgen delete
 
 # 查看认证状态
 passgen status
@@ -524,7 +531,7 @@ passgen init                     # 首次初始化
 passgen -l 20                   # 生成20位密码并保存
 passgen list                    # Touch ID 认证，查看密码库
 passgen search work             # 搜索工作相关密码
-passgen search -c work         # 搜索并复制密码
+passgen search gmail abc@gmail.com  # 精准一些：网站名+用户名组合搜索
 
 # 高级用法
 passgen --count 5 --no-symbols  # 生成5个无符号密码
@@ -589,7 +596,7 @@ passgen list  # 输入主密码，Touch ID 将自动启用
 **v2.1 (2024-07-15)**
 - ✅ 修复会话管理问题：现在使用全局认证实例，避免每次操作都需要 Touch ID 认证
 - ✅ 简化用户界面：移除复杂的 ID 显示，改用简单的序号操作
-- ✅ 合并快速复制功能到搜索命令：`passgen search -c` 
+- ✅ 改进 search 命令：支持 `passgen search <关键词>`（网站名/用户名同时模糊搜索）与 `passgen search <网站名> <用户名>`（分别模糊搜索），命中后自动复制
 - ✅ 新增配置管理命令：`passgen config` 支持动态修改会话超时等设置
 - ✅ 改进命令接口：`passgen edit 1`、`passgen delete 2` 等使用序号操作
 - ✅ 增强用户体验：更直观的序号系统，减少用户记忆负担

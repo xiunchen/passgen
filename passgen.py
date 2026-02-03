@@ -92,8 +92,8 @@ def cli(ctx, length, no_uppercase, no_lowercase, no_digits, no_symbols, custom_s
     🔍 搜索和复制：
 
     \b
-    passgen search github                # 搜索包含"github"的条目
-    passgen search -c github             # 搜索并直接复制
+    passgen search github                # 搜索网站名或用户名包含"github"的条目
+    passgen search gmail abc@gmail.com   # 搜索网站名包含"gmail"且用户名包含"abc@gmail.com"
     passgen list -c 3                    # 直接复制第3个条目
 
     ✏️ 管理操作：
@@ -266,9 +266,21 @@ def save_password(password):
         # 创建存储
         storage = SecureStorage()
         
-        # 获取网站信息
-        site = Prompt.ask("网站/应用名称")
-        username = Prompt.ask("用户名（可选）", default="")
+        # 获取网站信息（网站名和用户名都是必填）
+        while True:
+            site = Prompt.ask("网站/应用名称")
+            if site and site.strip():
+                site = site.strip()
+                break
+            console.print("❌ 网站/应用名称不能为空", style="red")
+        
+        while True:
+            username = Prompt.ask("用户名")
+            if username and username.strip():
+                username = username.strip()
+                break
+            console.print("❌ 用户名不能为空", style="red")
+        
         notes = Prompt.ask("备注（可选）", default="")
         
         # 添加密码
@@ -461,10 +473,23 @@ def list(query, copy):
 
 
 @cli.command()
-@click.argument('query')
-@click.option('-c', '--copy', is_flag=True, help='直接复制第一个搜索结果或选择复制')
-def search(query, copy):
-    """🔎 搜索密码条目（支持网站名、用户名、标签、备注）"""
+@click.argument('query1')
+@click.argument('query2', required=False, default=None)
+def search(query1, query2):
+    """🔎 搜索密码条目（支持网站名和用户名模糊搜索）
+    
+    \b
+    用法：
+      passgen search <关键词>              # 同时搜索网站名和用户名
+      passgen search <网站名> <用户名>     # 分别搜索网站名和用户名
+    
+    \b
+    示例：
+      passgen search gmail                 # 搜索网站名或用户名包含 "gmail" 的条目
+      passgen search gmail abc@gmail.com   # 搜索网站名包含 "gmail" 且用户名包含 "abc@gmail.com" 的条目
+    
+    搜索结果只命中一个时直接显示并复制密码；命中多个时列出供选择。
+    """
     try:
         # 检查是否已初始化
         if not check_initialization():
@@ -479,60 +504,49 @@ def search(query, copy):
             return
         
         storage = SecureStorage()
-        entries = storage.search_passwords(query, auth_result.password)
+        
+        # 根据参数数量选择搜索方式
+        if query2:
+            # 两个参数：第一个搜索网站名，第二个搜索用户名
+            entries = storage.search_by_site_and_username(
+                site_query=query1, 
+                username_query=query2, 
+                master_password=auth_result.password
+            )
+            search_desc = f"网站名包含 '{query1}' 且用户名包含 '{query2}'"
+        else:
+            # 一个参数：同时搜索网站名和用户名
+            entries = storage.search_site_or_username(query1, auth_result.password)
+            search_desc = f"网站名或用户名包含 '{query1}'"
         
         if not entries:
-            console.print(f"📭 没有找到包含 '{query}' 的密码条目")
+            console.print(f"📭 没有找到{search_desc}的密码条目")
             return
         
-        # 如果指定了 copy 参数
-        if copy:
-            if len(entries) == 1:
-                # 只有一个结果，直接复制
-                password = storage.get_password(entries[0].id, auth_result.password)
-                if password:
-                    clipboard = SecureClipboard()
-                    clipboard.copy_password(password.password, show_notification=False)
-                    console.print(f"✅ {password.site} 的密码已复制到剪贴板")
-                    return
+        # 只有一个结果，直接显示并复制
+        if len(entries) == 1:
+            entry = entries[0]
+            password = storage.get_password(entry.id, auth_result.password)
+            if password:
+                console.print(f"\n🔐 {password.site}")
+                console.print(f"👤 用户名: {password.username or '无'}")
+                
+                # 自动复制密码
+                clipboard = SecureClipboard()
+                clipboard.copy_password(password.password, show_notification=False)
+                console.print("✅ 密码已复制到剪贴板")
+                
+                if password.notes:
+                    console.print(f"📝 备注: {password.notes}")
+                
+                if password.tags:
+                    console.print(f"🏷️  标签: {', '.join(password.tags)}")
             else:
-                # 多个结果，显示表格让用户选择
-                table = Table(title=f"搜索结果: '{query}'")
-                table.add_column("#", style="dim", width=3)
-                table.add_column("网站", style="green")
-                table.add_column("用户名", style="yellow")
-                table.add_column("更新时间", style="blue")
-                
-                for idx, entry in enumerate(entries, 1):
-                    table.add_row(
-                        str(idx),
-                        entry.site,
-                        entry.username or "-",
-                        entry.updated_at[:10]
-                    )
-                
-                console.print(table)
-                
-                # 让用户选择
-                try:
-                    choice = Prompt.ask("选择序号", default="1")
-                    if choice.isdigit():
-                        idx = int(choice) - 1
-                        if 0 <= idx < len(entries):
-                            selected_entry = entries[idx]
-                            password = storage.get_password(selected_entry.id, auth_result.password)
-                            if password:
-                                clipboard = SecureClipboard()
-                                clipboard.copy_password(password.password, show_notification=False)
-                                console.print(f"✅ {password.site} 的密码已复制到剪贴板")
-                                return
-                except EOFError:
-                    pass
-                console.print("❌ 未选择有效的条目", style="red")
-                return
+                console.print("❌ 获取密码失败", style="red")
+            return
         
-        # 正常显示搜索结果（支持交互选择）
-        table = Table(title=f"搜索结果: '{query}'")
+        # 多个结果，显示表格让用户选择
+        table = Table(title=f"搜索结果: {search_desc}")
         table.add_column("#", style="dim", width=3)
         table.add_column("网站", style="green")
         table.add_column("用户名", style="yellow")
@@ -551,22 +565,15 @@ def search(query, copy):
         console.print(table)
         console.print(f"📊 找到 {len(entries)} 条匹配记录")
         
-        # 询问是否要选择条目查看详情
-        if entries:
-            console.print("\n💡 提示：输入序号(#)查看密码并复制，输入 q 退出")
-            try:
-                choice = Prompt.ask("选择", default="q")
-                if choice.lower() != 'q':
-                    selected_entry = None
-                    
-                    # 按序号选择
-                    if choice.isdigit():
-                        idx = int(choice)
-                        if 1 <= idx <= len(entries):
-                            selected_entry = entries[idx - 1]
-                    
-                    if selected_entry:
-                        # 显示密码详情
+        # 询问用户选择哪个条目
+        console.print("\n💡 提示：输入序号(#)查看密码并复制，输入 q 退出")
+        try:
+            choice = Prompt.ask("选择", default="1")
+            if choice.lower() != 'q':
+                if choice.isdigit():
+                    idx = int(choice)
+                    if 1 <= idx <= len(entries):
+                        selected_entry = entries[idx - 1]
                         password = storage.get_password(selected_entry.id, auth_result.password)
                         if password:
                             console.print(f"\n🔐 {password.site}")
@@ -585,9 +592,11 @@ def search(query, copy):
                         else:
                             console.print("❌ 获取密码失败", style="red")
                     else:
-                        console.print("❌ 无效选择", style="red")
-            except EOFError:
-                pass
+                        console.print(f"❌ 无效序号，请输入 1-{len(entries)} 之间的数字", style="red")
+                else:
+                    console.print("❌ 无效选择", style="red")
+        except EOFError:
+            pass
         
     except Exception as e:
         console.print(f"❌ 错误: {e}", style="red")
@@ -612,10 +621,21 @@ def add():
         
         # 使用循环而不是递归
         while True:
-            # 获取密码信息
+            # 获取密码信息（网站名和用户名都是必填）
             try:
-                site = Prompt.ask("网站/应用名称")
-                username = Prompt.ask("用户名", default="")
+                while True:
+                    site = Prompt.ask("网站/应用名称")
+                    if site and site.strip():
+                        site = site.strip()
+                        break
+                    console.print("❌ 网站/应用名称不能为空", style="red")
+                
+                while True:
+                    username = Prompt.ask("用户名")
+                    if username and username.strip():
+                        username = username.strip()
+                        break
+                    console.print("❌ 用户名不能为空", style="red")
             except EOFError:
                 console.print("❌ 非交互式环境，请使用命令行参数", style="red")
                 return
@@ -691,9 +711,15 @@ def add():
         console.print(f"❌ 错误: {e}", style="red")
 
 @cli.command()
-@click.argument('sequence_number', type=int)
+@click.argument('sequence_number', type=int, required=False)
 def edit(sequence_number):
-    """✏️ 编辑指定序号的密码条目"""
+    """✏️ 编辑指定序号的密码条目
+    
+    \b
+    用法：
+      passgen edit <序号>          # 直接编辑指定序号
+      passgen edit                # 列出条目并交互式选择要编辑的序号
+    """
     try:
         # 检查是否已初始化
         if not check_initialization():
@@ -711,6 +737,48 @@ def edit(sequence_number):
         
         # 获取所有条目
         all_entries = storage.list_all_passwords(auth_result.password)
+
+        if not all_entries:
+            console.print("📭 密码库为空，没有可编辑的条目")
+            return
+
+        # 未提供序号时：列出并让用户选择
+        if sequence_number is None:
+            table = Table(title="选择要编辑的密码条目")
+            table.add_column("#", style="dim", width=3)
+            table.add_column("网站", style="green")
+            table.add_column("用户名", style="yellow")
+            table.add_column("更新时间", style="blue")
+            table.add_column("标签", style="magenta")
+
+            for idx, entry in enumerate(all_entries, 1):
+                table.add_row(
+                    str(idx),
+                    entry.site,
+                    entry.username or "-",
+                    entry.updated_at[:10],
+                    ", ".join(entry.tags) if entry.tags else "-"
+                )
+
+            console.print(table)
+            console.print("\n💡 提示：输入序号(#)编辑，输入 q 退出")
+
+            try:
+                choice = Prompt.ask("选择", default="q")
+            except EOFError:
+                console.print("❌ 缺少参数 SEQUENCE_NUMBER（非交互环境）", style="red")
+                console.print("💡 请使用：passgen edit <序号>")
+                return
+
+            if choice.lower() == "q":
+                console.print("✅ 已取消编辑")
+                return
+
+            if not choice.isdigit():
+                console.print("❌ 无效选择，请输入数字序号或 q", style="red")
+                return
+
+            sequence_number = int(choice)
         
         # 检查序号是否有效
         if sequence_number < 1 or sequence_number > len(all_entries):
@@ -810,9 +878,15 @@ def edit(sequence_number):
         console.print(f"❌ 错误: {e}", style="red")
 
 @cli.command()
-@click.argument('sequence_number', type=int)
+@click.argument('sequence_number', type=int, required=False)
 def delete(sequence_number):
-    """🗑️ 删除指定序号的密码条目（需要确认）"""
+    """🗑️ 删除指定序号的密码条目（需要确认）
+    
+    \b
+    用法：
+      passgen delete <序号>        # 直接删除指定序号
+      passgen delete              # 列出条目并交互式选择要删除的序号
+    """
     try:
         # 检查是否已初始化
         if not check_initialization():
@@ -830,6 +904,48 @@ def delete(sequence_number):
         
         # 获取所有条目
         all_entries = storage.list_all_passwords(auth_result.password)
+
+        if not all_entries:
+            console.print("📭 密码库为空，没有可删除的条目")
+            return
+
+        # 未提供序号时：列出并让用户选择
+        if sequence_number is None:
+            table = Table(title="选择要删除的密码条目")
+            table.add_column("#", style="dim", width=3)
+            table.add_column("网站", style="green")
+            table.add_column("用户名", style="yellow")
+            table.add_column("更新时间", style="blue")
+            table.add_column("标签", style="magenta")
+
+            for idx, entry in enumerate(all_entries, 1):
+                table.add_row(
+                    str(idx),
+                    entry.site,
+                    entry.username or "-",
+                    entry.updated_at[:10],
+                    ", ".join(entry.tags) if entry.tags else "-"
+                )
+
+            console.print(table)
+            console.print("\n💡 提示：输入序号(#)删除，输入 q 退出")
+
+            try:
+                choice = Prompt.ask("选择", default="q")
+            except EOFError:
+                console.print("❌ 缺少参数 SEQUENCE_NUMBER（非交互环境）", style="red")
+                console.print("💡 请使用：passgen delete <序号>")
+                return
+
+            if choice.lower() == "q":
+                console.print("✅ 已取消删除")
+                return
+
+            if not choice.isdigit():
+                console.print("❌ 无效选择，请输入数字序号或 q", style="red")
+                return
+
+            sequence_number = int(choice)
         
         # 检查序号是否有效
         if sequence_number < 1 or sequence_number > len(all_entries):
@@ -840,12 +956,16 @@ def delete(sequence_number):
         entry_to_delete = all_entries[sequence_number - 1]
         
         # 确认删除
-        if not Confirm.ask(f"确定要删除 '{entry_to_delete.site}' 的密码条目吗？"):
+        display_name = entry_to_delete.site
+        if entry_to_delete.username:
+            display_name = f"{entry_to_delete.site} ({entry_to_delete.username})"
+
+        if not Confirm.ask(f"确定要删除 '{display_name}' 的密码条目吗？"):
             console.print("❌ 已取消删除")
             return
         
         if storage.delete_password(entry_to_delete.id, auth_result.password):
-            console.print(f"✅ 密码条目 '{entry_to_delete.site}' 已删除")
+            console.print(f"✅ 密码条目 '{display_name}' 已删除")
         else:
             console.print(f"❌ 删除失败", style="red")
         

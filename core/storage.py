@@ -392,6 +392,76 @@ class SecureStorage:
         
         return results
     
+    def search_by_site_and_username(self, site_query: str = None, username_query: str = None, 
+                                     master_password: str = None) -> List[PasswordEntry]:
+        """
+        按网站名和/或用户名进行模糊搜索
+        
+        Args:
+            site_query: 网站名搜索关键词（可选）
+            username_query: 用户名搜索关键词（可选）
+            master_password: 主密码
+            
+        Returns:
+            匹配的密码条目列表
+        """
+        data = self._load_encrypted_data(master_password)
+        results = []
+        
+        site_query_lower = site_query.lower() if site_query else None
+        username_query_lower = username_query.lower() if username_query else None
+        
+        for entry_data in data['passwords']:
+            site = entry_data.get('site', '').lower()
+            username = entry_data.get('username', '').lower()
+            
+            # 如果同时指定了网站和用户名，两者都要匹配
+            if site_query_lower and username_query_lower:
+                if site_query_lower in site and username_query_lower in username:
+                    results.append(PasswordEntry(**entry_data))
+            # 如果只指定了网站名
+            elif site_query_lower:
+                if site_query_lower in site:
+                    results.append(PasswordEntry(**entry_data))
+            # 如果只指定了用户名
+            elif username_query_lower:
+                if username_query_lower in username:
+                    results.append(PasswordEntry(**entry_data))
+        
+        # 按更新时间排序（最新的在前）
+        results.sort(key=lambda x: x.updated_at, reverse=True)
+        
+        return results
+    
+    def search_site_or_username(self, query: str, master_password: str) -> List[PasswordEntry]:
+        """
+        用单个关键词同时搜索网站名和用户名
+        
+        Args:
+            query: 搜索关键词
+            master_password: 主密码
+            
+        Returns:
+            匹配的密码条目列表
+        """
+        data = self._load_encrypted_data(master_password)
+        results = []
+        
+        query_lower = query.lower()
+        
+        for entry_data in data['passwords']:
+            site = entry_data.get('site', '').lower()
+            username = entry_data.get('username', '').lower()
+            
+            # 网站名或用户名匹配即可
+            if query_lower in site or query_lower in username:
+                results.append(PasswordEntry(**entry_data))
+        
+        # 按更新时间排序（最新的在前）
+        results.sort(key=lambda x: x.updated_at, reverse=True)
+        
+        return results
+    
     def list_all_passwords(self, master_password: str) -> List[PasswordEntry]:
         """
         获取所有密码条目

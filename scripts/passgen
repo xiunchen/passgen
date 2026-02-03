@@ -8,10 +8,30 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 # 设置Python路径
 export PYTHONPATH="$PROJECT_DIR:$PYTHONPATH"
 
-# 检查是否有虚拟环境
-if [ -d "$PROJECT_DIR/venv" ]; then
-    source "$PROJECT_DIR/venv/bin/activate"
+# 优先使用项目虚拟环境的 Python，避免系统 Python 缺依赖
+if [ -x "$PROJECT_DIR/venv/bin/python3" ]; then
+    PYTHON="$PROJECT_DIR/venv/bin/python3"
+elif [ -x "$PROJECT_DIR/venv/bin/python" ]; then
+    PYTHON="$PROJECT_DIR/venv/bin/python"
+else
+    PYTHON="$(command -v python3)"
 fi
 
-# 运行密码生成器
-python3 "$PROJECT_DIR/passgen.py" "$@"
+# 依赖检查（给出清晰提示，避免直接抛 Traceback）
+if ! "$PYTHON" -c "import click, rich, cryptography, keyring, pyperclip" >/dev/null 2>&1; then
+    echo "❌ PassGen 依赖未安装或未使用项目虚拟环境"
+    echo ""
+    echo "✅ 推荐在项目根目录执行："
+    echo "  ./install.sh"
+    echo ""
+    echo "或手动安装："
+    echo "  python3 -m venv venv"
+    echo "  source venv/bin/activate"
+    echo "  pip install -r requirements.txt"
+    echo ""
+    echo "当前使用的 Python: $PYTHON"
+    exit 1
+fi
+
+# 运行 PassGen
+exec "$PYTHON" "$PROJECT_DIR/passgen.py" "$@"
